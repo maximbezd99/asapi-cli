@@ -1,0 +1,26 @@
+[package]
+name = "asapi"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+description = "Public Apple App Store research CLI"
+readme = "README.md"
+keywords = ["app-store", "apple", "cli", "research"]
+categories = ["command-line-utilities", "api-bindings"]
+
+[lib]
+name = "asapi"
+path = "src/lib.rs"
+
+[[bin]]
+name = "asapi"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+reqwest = { version = "0.12", default-features = false, features = ["gzip", "http2", "json", "rustls-tls", "system-proxy"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
