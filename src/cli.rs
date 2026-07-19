@@ -62,9 +62,13 @@ pub struct SearchArgs {
     #[command(flatten)]
     pub country: CountryArgs,
 
-    /// Maximum number of results (1-200).
+    /// Maximum number of results requested from Apple (1-200).
     #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(u32).range(1..=200))]
     pub limit: u32,
+
+    /// Maximum number of results emitted locally (1-200; must not exceed --limit).
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..=200))]
+    pub local_limit: Option<u32>,
 }
 
 #[derive(Debug, Args)]
@@ -190,7 +194,27 @@ mod tests {
     #[test]
     fn invalid_limits_fail_during_argument_parsing() {
         assert!(Cli::try_parse_from(["asapi", "search", "test", "--limit", "201"]).is_err());
+        assert!(Cli::try_parse_from(["asapi", "search", "test", "--local-limit", "0"]).is_err());
         assert!(Cli::try_parse_from(["asapi", "chart", "free", "--limit", "0"]).is_err());
+    }
+
+    #[test]
+    fn parses_search_local_limit() {
+        let cli = Cli::try_parse_from([
+            "asapi",
+            "search",
+            "calendar",
+            "--limit",
+            "12",
+            "--local-limit",
+            "10",
+        ])
+        .unwrap();
+        let Command::Search(args) = cli.command else {
+            panic!("wrong command")
+        };
+        assert_eq!(args.limit, 12);
+        assert_eq!(args.local_limit, Some(10));
     }
 
     #[test]

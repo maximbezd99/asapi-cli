@@ -33,21 +33,42 @@ pub async fn run(client: &ApiClient, args: &SearchArgs) -> Result<Envelope> {
     if args.term.trim().is_empty() {
         bail!("search term must not be empty");
     }
+    validate_local_limit(args.limit, args.local_limit)?;
     let country = validate_country(&args.country.country)?;
     let json = client
         .fetch_json(search_url(&args.term, &country, args.limit)?)
         .await?;
-    let batch = parse(&json);
+    let mut batch = parse(&json);
+    apply_local_limit(&mut batch.records, args.local_limit);
+    let parameters = match args.local_limit {
+        Some(local_limit) => {
+            json!({"term": args.term, "limit": args.limit, "local_limit": local_limit})
+        }
+        None => json!({"term": args.term, "limit": args.limit}),
+    };
     envelope(
         "search",
         "Apple App Store search",
         Some(country),
-        json!({"term": args.term, "limit": args.limit}),
+        parameters,
         &batch.records,
         batch.skipped_count,
         None,
         Some("One-based order in this search result set; not an App Store keyword rank."),
     )
+}
+
+fn validate_local_limit(limit: u32, local_limit: Option<u32>) -> Result<()> {
+    if local_limit.is_some_and(|local_limit| local_limit > limit) {
+        bail!("--local-limit must not exceed --limit");
+    }
+    Ok(())
+}
+
+fn apply_local_limit<T>(records: &mut Vec<T>, local_limit: Option<u32>) {
+    if let Some(limit) = local_limit {
+        records.truncate(limit as usize);
+    }
 }
 
 fn search_url(term: &str, country: &str, limit: u32) -> Result<Url> {
@@ -109,5 +130,19 @@ mod tests {
         ]}));
         assert_eq!(batch.skipped_count, 1);
         assert_eq!(batch.records[1].position, 3);
+    }
+
+    #[test]
+    fn local_limit_truncates_normalized_records() {
+        let mut records = vec![1, 2, 3, 4];
+        apply_local_limit(&mut records, Some(2));
+        assert_eq!(records, vec![1, 2]);
+    }
+
+    #[test]
+    fn local_limit_cannot_exceed_upstream_limit() {
+        assert!(validate_local_limit(10, Some(11)).is_err());
+        assert!(validate_local_limit(10, Some(10)).is_ok());
+        assert!(validate_local_limit(10, None).is_ok());
     }
 }

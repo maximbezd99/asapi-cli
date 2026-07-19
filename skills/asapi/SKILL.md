@@ -9,6 +9,8 @@ Use `asapi` for read-only, country-specific public App Store research. It requir
 
 Before research, run `command -v asapi`. If it is missing, stop and state that the required CLI is unavailable. Do not fall back to raw HTTP.
 
+Research commands require outbound HTTPS. When command execution is sandboxed with network access disabled, use the environment's scoped network-access or approval mechanism on the first attempt. Otherwise run `asapi` normally. If network access is unavailable or denied, stop and state that access to `itunes.apple.com` or `apps.apple.com` is required. Do not treat a sandbox-denied attempt as evidence that Apple is unavailable.
+
 ## Discover commands
 
 - Run `asapi --help` to see the current command set.
@@ -33,6 +35,7 @@ Resolve uncertain app identities with `search`, then use the returned `app_id` w
 - Keep compact JSON for automation. Add `--pretty` only for human inspection.
 - Use `--output-file <path>` when the result must be saved as an artifact.
 - Preserve `meta.country`, `meta.retrieved_at`, `meta.source`, and `meta.parameters` when citing findings.
+- Treat `--limit` as an upper bound because Apple can return fewer records even when more matches exist; when at least N results are needed, use a modestly higher `--limit` (maximum 200) with `--local-limit N`, verify `meta.result_count >= N`, and use `meta.skipped_count` to distinguish Apple's short response (`0`) from malformed records discarded by `asapi` (`> 0`).
 - Keep stderr separate from data and preserve nonzero exit status on failure.
 
 ## Respect request limits
