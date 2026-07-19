@@ -7,7 +7,9 @@ description: Research public Apple App Store apps, developers, metadata, prices,
 
 Use `asapi` for read-only, country-specific public App Store research. It requires no App Store Connect credentials.
 
-Before research, run `command -v asapi`. If it is missing, stop and state that the required CLI is unavailable. Do not fall back to raw HTTP.
+This skill is designed for `asapi` CLI version `1.0.1`.
+
+Before research, run `command -v asapi`. If it is missing, stop and state that the required CLI is unavailable; otherwise run `asapi --version`, and if the reported version differs from the skill version above, highlight the mismatch for the user's information, recommend running `asapi install-skill` to update the skill before a future agent session, and continue with the available CLI. Do not fall back to raw HTTP.
 
 Research commands require outbound HTTPS. When command execution is sandboxed with network access disabled, use the environment's scoped network-access or approval mechanism on the first attempt. Otherwise run `asapi` normally. If network access is unavailable or denied, stop and state that access to `itunes.apple.com` or `apps.apple.com` is required. Do not treat a sandbox-denied attempt as evidence that Apple is unavailable.
 

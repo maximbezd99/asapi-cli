@@ -40,4 +40,17 @@ mod tests {
             "https://github.com/maximbezd99/asapi-cli/tree/1.2.3/skills/asapi"
         );
     }
+
+    #[test]
+    fn skill_declares_binary_version() {
+        let expected = format!(
+            "This skill is designed for `asapi` CLI version `{}`.",
+            env!("CARGO_PKG_VERSION")
+        );
+        assert!(
+            include_str!("../../skills/asapi/SKILL.md").contains(&expected),
+            "SKILL.md must declare compatibility with {}",
+            env!("CARGO_PKG_VERSION")
+        );
+    }
 }
