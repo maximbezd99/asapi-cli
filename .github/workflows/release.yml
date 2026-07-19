@@ -4,12 +4,21 @@ on:
   push:
     tags:
       - "*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version tag, without a v prefix
+        required: true
+        type: string
+
+env:
+  VERSION: ${{ inputs.version || github.ref_name }}
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.version || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -17,16 +26,18 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.VERSION }}
       - name: Verify release version
         shell: bash
         run: |
-          if [[ ! "${GITHUB_REF_NAME}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Release tag must use the form 1.2.3 (without a v prefix)." >&2
             exit 1
           fi
           crate_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
-          if [[ "${crate_version}" != "${GITHUB_REF_NAME}" ]]; then
-            echo "Cargo version ${crate_version} does not match tag ${GITHUB_REF_NAME}." >&2
+          if [[ "${crate_version}" != "${VERSION}" ]]; then
+            echo "Cargo version ${crate_version} does not match tag ${VERSION}." >&2
             exit 1
           fi
       - name: Install Rust toolchain
@@ -48,16 +59,18 @@ jobs:
       matrix:
         include:
           - runner: ubuntu-22.04
-            asset: asapi_${{ github.ref_name }}_linux_amd64
+            suffix: linux_amd64
           - runner: ubuntu-22.04-arm
-            asset: asapi_${{ github.ref_name }}_linux_arm64
+            suffix: linux_arm64
           - runner: macos-15-intel
-            asset: asapi_${{ github.ref_name }}_macOS_amd64
+            suffix: macOS_amd64
           - runner: macos-15
-            asset: asapi_${{ github.ref_name }}_macOS_arm64
+            suffix: macOS_arm64
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.VERSION }}
       - name: Install Rust toolchain
         run: |
           rustup update stable --no-self-update
@@ -68,11 +81,11 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          cp target/release/asapi "dist/${{ matrix.asset }}"
+          cp target/release/asapi "dist/asapi_${VERSION}_${{ matrix.suffix }}"
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.asset }}
-          path: dist/${{ matrix.asset }}
+          name: asapi_${{ env.VERSION }}_${{ matrix.suffix }}
+          path: dist/asapi_${{ env.VERSION }}_${{ matrix.suffix }}
           if-no-files-found: error
           retention-days: 1
 
@@ -84,20 +97,24 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          pattern: asapi_*
+          pattern: asapi_${{ env.VERSION }}_*
           path: dist
           merge-multiple: true
       - name: Generate checksums
         shell: bash
         run: |
           cd dist
-          sha256sum asapi_* > "asapi_${GITHUB_REF_NAME}_checksums.txt"
+          sha256sum asapi_* > "asapi_${VERSION}_checksums.txt"
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" dist/* \
-            --verify-tag \
-            --title "asapi ${GITHUB_REF_NAME}" \
-            --generate-notes
+          if gh release view "${VERSION}" >/dev/null 2>&1; then
+            gh release upload "${VERSION}" dist/* --clobber
+          else
+            gh release create "${VERSION}" dist/* \
+              --verify-tag \
+              --title "asapi ${VERSION}" \
+              --generate-notes
+          fi
