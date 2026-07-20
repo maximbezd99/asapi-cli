@@ -1,8 +1,13 @@
 # asapi
 
-`asapi` is a read-only command-line client for public Apple App Store research.
+`asapi` is a command-line client for Apple App Store search. It does not need any authentication.
 
-## Install
+It is intended to be used by AI agents to retrieve data from the App Store. To install the skill, run:
+
+```bash
+asapi install-skill
+```
+## Install or Update
 
 On macOS or Linux:
 
@@ -14,10 +19,4 @@ The installer supports Intel/AMD and ARM systems and installs to `~/.local/bin` 
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/maximbezd99/asapi-cli/main/install.sh | INSTALL_DIR=<dir> bash
-```
-
-## Install the matching App Store research skill for AI agents:
-
-```bash
-asapi install-skill
 ```
