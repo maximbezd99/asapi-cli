@@ -7,7 +7,7 @@ description: Research public Apple App Store apps, developers, metadata, prices,
 
 The skill is to be used with the `asapi` CLI, a read-only command-line client for public Apple App Store data, to perform country-specific research. It supports app discovery, metadata lookup, displayed in-app purchases, recent written reviews, and chart observations without App Store Connect credentials.
 
-This skill is designed for `asapi` CLI version `1.0.1`.
+This skill is designed for `asapi` CLI version `1.0.2`.
 
 Before research, run `command -v asapi`. If it is missing, stop, state that the required CLI is unavailable, and suggest installing it from <https://github.com/maximbezd99/asapi-cli>. Otherwise run `asapi --version`, and if the reported version differs from the skill version above, highlight the mismatch for the user's information, recommend running `asapi install-skill` to update the skill before a future agent session, and continue with the available CLI. Do not fall back to raw HTTP.
 
