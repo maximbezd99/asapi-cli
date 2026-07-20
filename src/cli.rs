@@ -31,7 +31,7 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Install the asapi research skill for an AI agent.
+    /// Install the app-store-research skill for an AI agent.
     InstallSkill,
     /// Search for apps by name or keyword.
     Search(SearchArgs),

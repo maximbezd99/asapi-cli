@@ -1,11 +1,11 @@
 ---
-name: asapi
-description: Research public Apple App Store apps, developers, metadata, prices, in-app purchases, ratings, written reviews, charts, competitors, search results, categories, and country comparisons with the asapi CLI. Use for current, country-specific App Store research and comparisons; do not use it to infer downloads, revenue, conversion, keyword volume, or historical rank.
+name: app-store-research
+description: Research public Apple App Store apps, developers, metadata, prices, in-app purchases, ratings, written reviews, charts, competitors, search results, categories, and country comparisons. Use for current, country-specific App Store research and comparisons; do not use it to infer downloads, revenue, conversion, keyword volume, or historical rank.
 ---
 
-# Research the public App Store with asapi
+# Research the public Apple App Store
 
-Use `asapi` for read-only, country-specific public App Store research. It requires no App Store Connect credentials.
+The skill is to be used with the `asapi` CLI, a read-only command-line client for public Apple App Store data, to perform country-specific research. It supports app discovery, metadata lookup, displayed in-app purchases, recent written reviews, and chart observations without App Store Connect credentials.
 
 This skill is designed for `asapi` CLI version `1.0.1`.
 

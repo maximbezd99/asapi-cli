@@ -26,7 +26,7 @@ pub fn run() -> Result<()> {
 }
 
 fn source_for_version(version: &str) -> String {
-    format!("{REPOSITORY_URL}/tree/{version}/skills/asapi")
+    format!("{REPOSITORY_URL}/tree/{version}/skills/app-store-research")
 }
 
 #[cfg(test)]
@@ -37,7 +37,7 @@ mod tests {
     fn skill_source_is_pinned_to_binary_version() {
         assert_eq!(
             source_for_version("1.2.3"),
-            "https://github.com/maximbezd99/asapi-cli/tree/1.2.3/skills/asapi"
+            "https://github.com/maximbezd99/asapi-cli/tree/1.2.3/skills/app-store-research"
         );
     }
 
@@ -48,7 +48,7 @@ mod tests {
             env!("CARGO_PKG_VERSION")
         );
         assert!(
-            include_str!("../../skills/asapi/SKILL.md").contains(&expected),
+            include_str!("../../skills/app-store-research/SKILL.md").contains(&expected),
             "SKILL.md must declare compatibility with {}",
             env!("CARGO_PKG_VERSION")
         );
