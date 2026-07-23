@@ -16,6 +16,7 @@ pub mod iap;
 pub mod install_skill;
 pub mod list;
 pub mod lookup;
+pub mod popularity;
 pub mod reviews;
 pub mod search;
 
@@ -49,6 +50,7 @@ pub async fn execute(command: &Command, config: ClientConfig) -> Result<CommandO
     let envelope = match command {
         Command::Search(args) => search::run(&client, args).await?,
         Command::Lookup(args) => lookup::run(&client, args).await?,
+        Command::Popularity(args) => popularity::run(&client, args).await?,
         Command::Iap(args) => iap::run(&client, args).await?,
         Command::Reviews(args) => reviews::run(&client, args).await?,
         Command::Chart(args) => chart::run(&client, args).await?,

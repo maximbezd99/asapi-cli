@@ -6,7 +6,7 @@ use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 #[command(
     name = "asapi",
     version,
-    about = "Query Apple App Store apps, purchases, reviews, and charts"
+    about = "Query Apple App Store apps, ratings, purchases, reviews, and charts"
 )]
 pub struct Cli {
     /// Format JSON with indentation.
@@ -37,6 +37,8 @@ pub enum Command {
     Search(SearchArgs),
     /// Get details for one or more apps.
     Lookup(LookupArgs),
+    /// Compare an app's public ratings across multiple countries.
+    Popularity(PopularityArgs),
     /// Get in-app purchases displayed for an app.
     Iap(IapArgs),
     /// Get recent customer reviews for an app.
@@ -79,6 +81,40 @@ pub struct LookupArgs {
 
     #[command(flatten)]
     pub country: CountryArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct PopularityArgs {
+    /// App Store ID.
+    pub id: u64,
+
+    /// Country group to query when --countries is not provided.
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = PopularityGroup::Tier1,
+        long_help = "Country group to query when --countries is not provided.\n\nTier 1: us, ca, cn, jp, gb, de, fr, kr, au.\nTier 2: all Tier 1 countries plus in, br, mx, es, it, nl, id, sg, hk, tw, ae."
+    )]
+    pub group: PopularityGroup,
+
+    /// Comma-separated country codes; overrides --group.
+    #[arg(long, value_delimiter = ',', num_args = 1..)]
+    pub countries: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum PopularityGroup {
+    Tier1,
+    Tier2,
+}
+
+impl PopularityGroup {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Tier1 => "tier1",
+            Self::Tier2 => "tier2",
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -225,6 +261,39 @@ mod tests {
         };
         assert_eq!(args.id, 42);
         assert_eq!(args.country.country, "ae");
+    }
+
+    #[test]
+    fn popularity_defaults_to_tier1() {
+        let cli = Cli::try_parse_from(["asapi", "popularity", "42"]).unwrap();
+        let Command::Popularity(args) = cli.command else {
+            panic!("wrong command")
+        };
+        assert_eq!(args.id, 42);
+        assert_eq!(args.group, PopularityGroup::Tier1);
+        assert_eq!(args.countries, None);
+    }
+
+    #[test]
+    fn popularity_parses_country_override_and_group() {
+        let cli = Cli::try_parse_from([
+            "asapi",
+            "popularity",
+            "42",
+            "--group",
+            "tier2",
+            "--countries",
+            "jp,us,gb",
+        ])
+        .unwrap();
+        let Command::Popularity(args) = cli.command else {
+            panic!("wrong command")
+        };
+        assert_eq!(args.group, PopularityGroup::Tier2);
+        assert_eq!(
+            args.countries,
+            Some(vec!["jp".into(), "us".into(), "gb".into()])
+        );
     }
 
     #[test]

@@ -60,7 +60,7 @@ pub async fn run(client: &ApiClient, args: &LookupArgs) -> Result<Envelope> {
     )
 }
 
-fn lookup_url(ids: &[u64], country: &str) -> Result<Url> {
+pub(super) fn lookup_url(ids: &[u64], country: &str) -> Result<Url> {
     if ids.is_empty() {
         bail!("lookup requires at least one app ID");
     }
@@ -72,7 +72,7 @@ fn lookup_url(ids: &[u64], country: &str) -> Result<Url> {
     Ok(url)
 }
 
-fn parse(json: &Value) -> ParseBatch<LookupApp> {
+pub(super) fn parse(json: &Value) -> ParseBatch<LookupApp> {
     parse_result_array(json, |value, _| {
         Some(LookupApp {
             app_id: value.get("trackId")?.as_u64()?,
