@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 
 use super::{artist_id_from_href, envelope, label, parse_feed_entries, text, ParseBatch};
 use crate::{
-    categories::is_valid_category, cli::ChartArgs, client::ApiClient, countries::validate_country,
+    app_store::resolve_country, categories::is_valid_category, cli::ChartArgs, client::ApiClient,
     output::Envelope,
 };
 
@@ -34,7 +34,7 @@ pub async fn run(client: &ApiClient, args: &ChartArgs) -> Result<Envelope> {
             bail!("unsupported category ID {category}; run 'asapi list categories'");
         }
     }
-    let country = validate_country(&args.country.country)?;
+    let country = resolve_country(args.country.country.as_deref(), &[])?;
     let chart = args.chart.as_str();
     let json = client
         .fetch_json(chart_url(chart, &country, args.limit, args.category)?)

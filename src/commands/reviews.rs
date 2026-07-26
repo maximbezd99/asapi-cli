@@ -1,13 +1,13 @@
 use std::collections::HashSet;
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use chrono::{DateTime, FixedOffset};
 use reqwest::Url;
 use serde::Serialize;
 use serde_json::{json, Value};
 
 use super::{envelope, label, parse_feed_entries, ParseBatch};
-use crate::{cli::ReviewsArgs, client::ApiClient, countries::validate_country, output::Envelope};
+use crate::{app_store::resolve_country, cli::ReviewsArgs, client::ApiClient, output::Envelope};
 
 #[derive(Debug, Serialize, PartialEq)]
 pub struct AppReview {
@@ -23,17 +23,18 @@ pub struct AppReview {
 }
 
 pub async fn run(client: &ApiClient, args: &ReviewsArgs) -> Result<Envelope> {
-    if args.id == 0 {
-        bail!("app ID must be a positive integer");
-    }
-    let country = validate_country(&args.country.country)?;
+    let app_id = args.app.id;
+    let country = resolve_country(
+        args.country.country.as_deref(),
+        std::slice::from_ref(&args.app),
+    )?;
     let pages = args.requested_pages();
     let mut all = Vec::new();
     let mut skipped_count = 0;
     let mut pages_retrieved = 0;
     for page in &pages {
         let json = client
-            .fetch_json(reviews_url(args.id, &country, *page)?)
+            .fetch_json(reviews_url(app_id, &country, *page)?)
             .await?;
         let batch = parse(&json);
         skipped_count += batch.skipped_count;
@@ -42,7 +43,7 @@ pub async fn run(client: &ApiClient, args: &ReviewsArgs) -> Result<Envelope> {
     }
     let (reviews, duplicate_count) = deduplicate(all);
     let parameters = json!({
-        "app_id": args.id,
+        "app_id": app_id,
         "pages_requested": pages,
         "pages_retrieved": pages_retrieved,
         "maximum_available_pages": 10

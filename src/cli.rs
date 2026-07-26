@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 
+use crate::app_store::AppSpecifier;
+
 #[derive(Debug, Parser)]
 #[command(
     name = "asapi",
@@ -51,9 +53,9 @@ pub enum Command {
 
 #[derive(Debug, Args)]
 pub struct CountryArgs {
-    /// Two-letter App Store country code.
-    #[arg(long, default_value = "us")]
-    pub country: String,
+    /// App Store country code (overrides URL; default: URL storefront or us).
+    #[arg(long)]
+    pub country: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -75,9 +77,9 @@ pub struct SearchArgs {
 
 #[derive(Debug, Args)]
 pub struct LookupArgs {
-    /// App Store IDs to look up (maximum 200).
-    #[arg(required = true, num_args = 1..)]
-    pub ids: Vec<u64>,
+    /// App Store IDs or product URLs to look up (maximum 10).
+    #[arg(required = true, num_args = 1..=10)]
+    pub apps: Vec<AppSpecifier>,
 
     #[command(flatten)]
     pub country: CountryArgs,
@@ -85,8 +87,8 @@ pub struct LookupArgs {
 
 #[derive(Debug, Args)]
 pub struct PopularityArgs {
-    /// App Store ID.
-    pub id: u64,
+    /// App Store ID or product URL.
+    pub app: AppSpecifier,
 
     /// Country group to query when --countries is not provided.
     #[arg(
@@ -119,8 +121,8 @@ impl PopularityGroup {
 
 #[derive(Debug, Args)]
 pub struct IapArgs {
-    /// App Store ID.
-    pub id: u64,
+    /// App Store ID or product URL.
+    pub app: AppSpecifier,
 
     #[command(flatten)]
     pub country: CountryArgs,
@@ -129,8 +131,8 @@ pub struct IapArgs {
 #[derive(Debug, Args)]
 #[command(group(ArgGroup::new("page_selection").args(["page", "pages", "all"]).multiple(false)))]
 pub struct ReviewsArgs {
-    /// App Store ID.
-    pub id: u64,
+    /// App Store ID or product URL.
+    pub app: AppSpecifier,
 
     #[command(flatten)]
     pub country: CountryArgs,
@@ -259,8 +261,52 @@ mod tests {
         let Command::Iap(args) = cli.command else {
             panic!("wrong command")
         };
-        assert_eq!(args.id, 42);
-        assert_eq!(args.country.country, "ae");
+        assert_eq!(args.app.id, 42);
+        assert_eq!(args.country.country.as_deref(), Some("ae"));
+    }
+
+    #[test]
+    fn parses_app_store_urls_for_id_commands() {
+        let url = "apps.apple.com/gb/app/example/id42";
+
+        let cli = Cli::try_parse_from(["asapi", "lookup", "7", url]).unwrap();
+        let Command::Lookup(args) = cli.command else {
+            panic!("wrong command")
+        };
+        assert_eq!(
+            args.apps.iter().map(|app| app.id).collect::<Vec<_>>(),
+            [7, 42]
+        );
+
+        let cli = Cli::try_parse_from(["asapi", "popularity", url]).unwrap();
+        let Command::Popularity(args) = cli.command else {
+            panic!("wrong command")
+        };
+        assert_eq!(args.app.id, 42);
+
+        let cli = Cli::try_parse_from(["asapi", "iap", url]).unwrap();
+        let Command::Iap(args) = cli.command else {
+            panic!("wrong command")
+        };
+        assert_eq!(args.app.country.as_deref(), Some("gb"));
+
+        let cli = Cli::try_parse_from(["asapi", "reviews", url]).unwrap();
+        let Command::Reviews(args) = cli.command else {
+            panic!("wrong command")
+        };
+        assert_eq!(args.app.country.as_deref(), Some("gb"));
+    }
+
+    #[test]
+    fn lookup_accepts_at_most_ten_apps() {
+        assert!(Cli::try_parse_from([
+            "asapi", "lookup", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
+        ])
+        .is_ok());
+        assert!(Cli::try_parse_from([
+            "asapi", "lookup", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11",
+        ])
+        .is_err());
     }
 
     #[test]
@@ -269,7 +315,7 @@ mod tests {
         let Command::Popularity(args) = cli.command else {
             panic!("wrong command")
         };
-        assert_eq!(args.id, 42);
+        assert_eq!(args.app.id, 42);
         assert_eq!(args.group, PopularityGroup::Tier1);
         assert_eq!(args.countries, None);
     }

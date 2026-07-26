@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use serde::Serialize;
 use serde_json::json;
 
@@ -28,22 +28,19 @@ pub struct PopularityRecord {
 }
 
 pub async fn run(client: &ApiClient, args: &PopularityArgs) -> Result<Envelope> {
-    if args.id == 0 {
-        bail!("app ID must be a positive integer");
-    }
-
+    let app_id = args.app.id;
     let countries = selected_countries(args)?;
     let mut records = Vec::with_capacity(countries.len());
     let mut skipped_count = 0;
 
     for country in &countries {
         let json = client
-            .fetch_json(lookup::lookup_url(&[args.id], country)?)
+            .fetch_json(lookup::lookup_url(&[app_id], country)?)
             .await?;
         let batch = lookup::parse(&json);
         skipped_count += batch.skipped_count;
         records.push(record_for_country(
-            args.id,
+            app_id,
             country.clone(),
             batch.records.into_iter().next(),
         ));
@@ -60,7 +57,7 @@ pub async fn run(client: &ApiClient, args: &PopularityArgs) -> Result<Envelope> 
         "Apple App Store",
         None,
         json!({
-            "app_id": args.id,
+            "app_id": app_id,
             "group": selected_group,
             "countries": countries,
         }),
@@ -140,7 +137,7 @@ mod tests {
 
     fn args(group: PopularityGroup, countries: Option<Vec<&str>>) -> PopularityArgs {
         PopularityArgs {
-            id: 42,
+            app: "42".parse().unwrap(),
             group,
             countries: countries.map(|values| values.into_iter().map(str::to_string).collect()),
         }

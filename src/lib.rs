@@ -1,3 +1,4 @@
+pub mod app_store;
 pub mod categories;
 pub mod cli;
 pub mod client;

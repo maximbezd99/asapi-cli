@@ -1,13 +1,13 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use reqwest::Url;
 use serde::Serialize;
 use serde_json::{json, Value};
 
 use super::{retrieved_at, text};
 use crate::{
+    app_store::resolve_country,
     cli::IapArgs,
     client::ApiClient,
-    countries::validate_country,
     output::{Envelope, Meta},
 };
 
@@ -26,12 +26,13 @@ pub struct AppIaps {
 }
 
 pub async fn run(client: &ApiClient, args: &IapArgs) -> Result<Envelope> {
-    if args.id == 0 {
-        bail!("app ID must be a positive integer");
-    }
-    let country = validate_country(&args.country.country)?;
-    let html = client.fetch_text(iap_url(args.id, &country)?).await?;
-    let result = parse(&html, args.id)?;
+    let app_id = args.app.id;
+    let country = resolve_country(
+        args.country.country.as_deref(),
+        std::slice::from_ref(&args.app),
+    )?;
+    let html = client.fetch_text(iap_url(app_id, &country)?).await?;
+    let result = parse(&html, app_id)?;
     let result_count = result.purchases.len();
     Ok(Envelope {
         data: serde_json::to_value(result)?,
@@ -40,7 +41,7 @@ pub async fn run(client: &ApiClient, args: &IapArgs) -> Result<Envelope> {
             retrieved_at: retrieved_at(),
             command: "iap".to_string(),
             source: "Apple App Store product page".to_string(),
-            parameters: json!({"app_id": args.id}),
+            parameters: json!({"app_id": app_id}),
             result_count,
             skipped_count: 0,
             duplicate_count: None,

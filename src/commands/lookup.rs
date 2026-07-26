@@ -5,7 +5,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use super::{date, envelope, parse_result_array, strings, text, u32_field, ParseBatch};
-use crate::{cli::LookupArgs, client::ApiClient, countries::validate_country, output::Envelope};
+use crate::{app_store::resolve_country, cli::LookupArgs, client::ApiClient, output::Envelope};
 
 #[derive(Debug, Serialize, PartialEq)]
 pub struct LookupApp {
@@ -39,20 +39,18 @@ pub struct LookupApp {
 }
 
 pub async fn run(client: &ApiClient, args: &LookupArgs) -> Result<Envelope> {
-    if args.ids.len() > 200 {
-        bail!("lookup accepts at most 200 app IDs per request");
+    if args.apps.len() > 10 {
+        bail!("lookup accepts at most 10 apps per request");
     }
-    if args.ids.contains(&0) {
-        bail!("app IDs must be positive integers");
-    }
-    let country = validate_country(&args.country.country)?;
-    let json = client.fetch_json(lookup_url(&args.ids, &country)?).await?;
+    let ids = args.apps.iter().map(|app| app.id).collect::<Vec<_>>();
+    let country = resolve_country(args.country.country.as_deref(), &args.apps)?;
+    let json = client.fetch_json(lookup_url(&ids, &country)?).await?;
     let batch = parse(&json);
     envelope(
         "lookup",
         "Apple App Store",
         Some(country),
-        json!({"app_ids": args.ids}),
+        json!({"app_ids": ids}),
         &batch.records,
         batch.skipped_count,
         None,

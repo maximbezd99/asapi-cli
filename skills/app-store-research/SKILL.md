@@ -7,7 +7,7 @@ description: Research public Apple App Store apps, developers, metadata, prices,
 
 Use the `asapi` CLI, a read-only command-line client for public Apple App Store data, to perform country-specific research. Use it for app discovery, metadata lookup, multi-country popularity signals, displayed in-app purchases, recent written reviews, and chart observations without App Store Connect credentials.
 
-This skill is designed for `asapi` CLI version `1.1.0`.
+This skill is designed for `asapi` CLI version `1.2.0`.
 
 Before research, run `command -v asapi`. If it is missing, stop, state that the required CLI is unavailable, and suggest installing it from <https://github.com/maximbezd99/asapi-cli>. Otherwise run `asapi --version`, and if the reported version differs from the skill version above, highlight the mismatch for the user's information, recommend running `asapi install-skill` to update the skill before a future agent session, and continue with the available CLI. Do not fall back to raw HTTP.
 
@@ -30,7 +30,7 @@ Research commands require outbound HTTPS. When command execution is sandboxed wi
 | Sample recent written reviews | `asapi reviews 123456789 --country us --pages 3` |
 | Observe a free apps chart | `asapi chart free --country us --limit 25 --category 6007` |
 
-Resolve uncertain app identities with `search`, then use the returned `app_id` with `lookup`, `popularity`, `iap`, or `reviews`. Batch multiple known IDs in one `lookup` call.
+Resolve uncertain app identities with `search`, then use the returned `app_id` or `app_store_url` with `lookup`, `popularity`, `iap`, or `reviews`. For `lookup`, `iap`, and `reviews`, omit `--country` to use the storefront in an App Store URL; an explicit `--country` takes priority, and raw IDs default to `us`. Batch multiple known IDs or URLs in one `lookup` call. If batched URLs use different storefronts, pass `--country` explicitly. `popularity` ignores the URL storefront and continues to select countries with `--group` or `--countries`.
 
 Use `popularity` for a multi-country comparison of one app:
 

@@ -4,7 +4,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use super::{envelope, parse_result_array, strings, text, u32_field, ParseBatch};
-use crate::{cli::SearchArgs, client::ApiClient, countries::validate_country, output::Envelope};
+use crate::{app_store::resolve_country, cli::SearchArgs, client::ApiClient, output::Envelope};
 
 #[derive(Debug, Serialize, PartialEq)]
 pub struct SearchApp {
@@ -34,7 +34,7 @@ pub async fn run(client: &ApiClient, args: &SearchArgs) -> Result<Envelope> {
         bail!("search term must not be empty");
     }
     validate_local_limit(args.limit, args.local_limit)?;
-    let country = validate_country(&args.country.country)?;
+    let country = resolve_country(args.country.country.as_deref(), &[])?;
     let json = client
         .fetch_json(search_url(&args.term, &country, args.limit)?)
         .await?;
