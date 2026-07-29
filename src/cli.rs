@@ -8,7 +8,7 @@ use crate::app_store::AppSpecifier;
 #[command(
     name = "asapi",
     version,
-    about = "Query Apple App Store apps, ratings, purchases, reviews, and charts"
+    about = "Query Apple App Store apps, ratings, purchases, reviews, recommendations, and charts"
 )]
 pub struct Cli {
     /// Format JSON with indentation.
@@ -43,6 +43,8 @@ pub enum Command {
     Popularity(PopularityArgs),
     /// Get in-app purchases displayed for an app.
     Iap(IapArgs),
+    /// Get similar apps displayed for an app.
+    Similar(SimilarArgs),
     /// Get recent customer reviews for an app.
     Reviews(ReviewsArgs),
     /// Get the current top apps for a country or category.
@@ -121,6 +123,15 @@ impl PopularityGroup {
 
 #[derive(Debug, Args)]
 pub struct IapArgs {
+    /// App Store ID or product URL.
+    pub app: AppSpecifier,
+
+    #[command(flatten)]
+    pub country: CountryArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct SimilarArgs {
     /// App Store ID or product URL.
     pub app: AppSpecifier,
 
@@ -286,6 +297,12 @@ mod tests {
 
         let cli = Cli::try_parse_from(["asapi", "iap", url]).unwrap();
         let Command::Iap(args) = cli.command else {
+            panic!("wrong command")
+        };
+        assert_eq!(args.app.country.as_deref(), Some("gb"));
+
+        let cli = Cli::try_parse_from(["asapi", "similar", url]).unwrap();
+        let Command::Similar(args) = cli.command else {
             panic!("wrong command")
         };
         assert_eq!(args.app.country.as_deref(), Some("gb"));

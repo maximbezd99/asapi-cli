@@ -1,7 +1,8 @@
 use std::{borrow::Cow, str::FromStr};
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use reqwest::Url;
+use serde_json::Value;
 
 use crate::countries::validate_country;
 
@@ -13,12 +14,57 @@ pub struct AppSpecifier {
     pub country: Option<String>,
 }
 
+pub(crate) struct ProductPagePayload {
+    payload: Value,
+}
+
+impl ProductPagePayload {
+    pub(crate) fn parse(html: &str) -> Result<Self> {
+        let marker = "id=\"serialized-server-data\"";
+        let marker_start = html
+            .find(marker)
+            .context("App Store page does not contain product data")?;
+        let content_start = html[marker_start..]
+            .find('>')
+            .map(|offset| marker_start + offset + 1)
+            .context("App Store product data is malformed")?;
+        let content_end = html[content_start..]
+            .find("</script>")
+            .map(|offset| content_start + offset)
+            .context("App Store product data is incomplete")?;
+        let payload = serde_json::from_str(&html[content_start..content_end])
+            .context("App Store product data is invalid JSON")?;
+        Ok(Self { payload })
+    }
+
+    pub(crate) fn app_data(&self, app_id: u64) -> Result<&Value> {
+        let expected_id = app_id.to_string();
+        self.payload
+            .get("data")
+            .and_then(Value::as_array)
+            .and_then(|pages| {
+                pages.iter().find(|page| {
+                    page.pointer("/intent/id").and_then(Value::as_str) == Some(expected_id.as_str())
+                })
+            })
+            .with_context(|| format!("App Store page does not contain app {app_id}"))?
+            .get("data")
+            .context("App Store page does not contain app details")
+    }
+}
+
 impl FromStr for AppSpecifier {
     type Err = String;
 
     fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
         parse_app_specifier(value).map_err(|error| error.to_string())
     }
+}
+
+pub(crate) fn product_page_url(id: u64, country: &str) -> Result<Url> {
+    Ok(Url::parse(&format!(
+        "https://apps.apple.com/{country}/app/id{id}"
+    ))?)
 }
 
 pub fn resolve_country(explicit: Option<&str>, apps: &[AppSpecifier]) -> Result<String> {

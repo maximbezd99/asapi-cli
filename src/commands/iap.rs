@@ -1,11 +1,10 @@
 use anyhow::{Context, Result};
-use reqwest::Url;
 use serde::Serialize;
 use serde_json::{json, Value};
 
 use super::{retrieved_at, text};
 use crate::{
-    app_store::resolve_country,
+    app_store::{product_page_url, resolve_country, ProductPagePayload},
     cli::IapArgs,
     client::ApiClient,
     output::{Envelope, Meta},
@@ -31,7 +30,9 @@ pub async fn run(client: &ApiClient, args: &IapArgs) -> Result<Envelope> {
         args.country.country.as_deref(),
         std::slice::from_ref(&args.app),
     )?;
-    let html = client.fetch_text(iap_url(app_id, &country)?).await?;
+    let html = client
+        .fetch_text(product_page_url(app_id, &country)?)
+        .await?;
     let result = parse(&html, app_id)?;
     let result_count = result.purchases.len();
     Ok(Envelope {
@@ -54,41 +55,9 @@ pub async fn run(client: &ApiClient, args: &IapArgs) -> Result<Envelope> {
     })
 }
 
-fn iap_url(id: u64, country: &str) -> Result<Url> {
-    Ok(Url::parse(&format!(
-        "https://apps.apple.com/{country}/app/id{id}"
-    ))?)
-}
-
 fn parse(html: &str, app_id: u64) -> Result<AppIaps> {
-    let marker = "id=\"serialized-server-data\"";
-    let marker_start = html
-        .find(marker)
-        .context("App Store page does not contain product data")?;
-    let content_start = html[marker_start..]
-        .find('>')
-        .map(|offset| marker_start + offset + 1)
-        .context("App Store product data is malformed")?;
-    let content_end = html[content_start..]
-        .find("</script>")
-        .map(|offset| content_start + offset)
-        .context("App Store product data is incomplete")?;
-    let payload: Value = serde_json::from_str(&html[content_start..content_end])
-        .context("App Store product data is invalid JSON")?;
-
-    let expected_id = app_id.to_string();
-    let page = payload
-        .get("data")
-        .and_then(Value::as_array)
-        .and_then(|pages| {
-            pages.iter().find(|page| {
-                page.pointer("/intent/id").and_then(Value::as_str) == Some(expected_id.as_str())
-            })
-        })
-        .with_context(|| format!("App Store page does not contain app {app_id}"))?;
-    let data = page
-        .get("data")
-        .context("App Store page does not contain app details")?;
+    let payload = ProductPagePayload::parse(html)?;
+    let data = payload.app_data(app_id)?;
     let offer = data
         .get("titleOfferDisplayProperties")
         .or_else(|| data.pointer("/lockup/offerDisplayProperties"))
@@ -158,7 +127,7 @@ mod tests {
     #[test]
     fn url_uses_country_product_page() {
         assert_eq!(
-            iap_url(42, "ae").unwrap().as_str(),
+            product_page_url(42, "ae").unwrap().as_str(),
             "https://apps.apple.com/ae/app/id42"
         );
     }
