@@ -1,0 +1,20 @@
+[package]
+name = "asapi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "asapi"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+appstore-api = { path = "../appstore-api" }
+asapi-server = { path = "../server" }
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
