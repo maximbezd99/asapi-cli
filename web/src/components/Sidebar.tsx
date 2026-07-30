@@ -1,7 +1,8 @@
-import { Blocks, ChevronDown, Plus, Star, X } from "lucide-react";
-import { useState } from "react";
+import { Blocks, Plus, Star, X } from "lucide-react";
+import { useMemo, useState } from "react";
 import { countryFlag, formatCount } from "../format";
 import type { AppSummary, Country, Project } from "../types";
+import Picker from "./Picker";
 
 interface Props {
   projects: Project[];
@@ -33,6 +34,20 @@ export default function Sidebar({
   const [appCountry, setAppCountry] = useState("us");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const sortedApps = useMemo(
+    () =>
+      [...apps].sort((left, right) => {
+        const ratingDifference =
+          (right.rating_count ?? -1) - (left.rating_count ?? -1);
+        if (ratingDifference) return ratingDifference;
+        return (left.name ?? String(left.apple_id)).localeCompare(
+          right.name ?? String(right.apple_id),
+          undefined,
+          { sensitivity: "base" },
+        );
+      }),
+    [apps],
+  );
 
   const submitProject = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -87,20 +102,19 @@ export default function Sidebar({
             {projectForm ? <X size={12} /> : <Plus size={12} />}
           </button>
         </span>
-        <div>
-          <Blocks size={15} />
-          <select
-            value={projectId}
-            onChange={(event) => onProjectChange(event.target.value)}
-          >
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
-          <ChevronDown size={14} />
-        </div>
+        <Picker
+          value={projectId}
+          options={projects.map((project) => ({
+            value: project.id,
+            label: project.name,
+            meta: project.id.slice(0, 8),
+            icon: <Blocks size={13} />,
+          }))}
+          onChange={onProjectChange}
+          ariaLabel="Project"
+          className="project-picker"
+          searchPlaceholder="Search projects"
+        />
         {projectForm ? (
           <form className="sidebar-form" onSubmit={submitProject}>
             <input
@@ -140,17 +154,20 @@ export default function Sidebar({
             autoFocus
           />
           <div>
-            <select
+            <Picker
               value={appCountry}
-              onChange={(event) => setAppCountry(event.target.value)}
-              aria-label="Main storefront"
-            >
-              {countries.map((country) => (
-                <option value={country.code} key={country.code}>
-                  {country.name}
-                </option>
-              ))}
-            </select>
+              options={countries.map((country) => ({
+                value: country.code,
+                label: country.name,
+                triggerLabel: country.code.toUpperCase(),
+                meta: country.code.toUpperCase(),
+                icon: countryFlag(country.code),
+              }))}
+              onChange={setAppCountry}
+              ariaLabel="Main storefront"
+              className="sidebar-country-picker"
+              searchPlaceholder="Search countries"
+            />
             <button type="submit" disabled={busy || !appSource.trim()}>
               Add
             </button>
@@ -159,7 +176,7 @@ export default function Sidebar({
       ) : null}
       {error ? <div className="sidebar-form-error">{error}</div> : null}
       <nav className="app-list">
-        {apps.map((app) => (
+        {sortedApps.map((app) => (
           <button
             className={selectedAppId === app.apple_id ? "active" : ""}
             key={app.apple_id}

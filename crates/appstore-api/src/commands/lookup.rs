@@ -36,6 +36,7 @@ pub struct LookupApp {
     pub categories: Vec<String>,
     pub category_ids: Vec<String>,
     pub seller_name: Option<String>,
+    pub developer_website_url: Option<String>,
     pub app_store_url: Option<String>,
     pub icon_url: Option<String>,
     pub screenshots: Vec<String>,
@@ -106,6 +107,9 @@ async fn enrich_from_product_page(
     if !product_page_screenshots.is_empty() {
         app.screenshots = product_page_screenshots;
     }
+    if app.developer_website_url.is_none() {
+        app.developer_website_url = developer_website_url(data);
+    }
     app.has_in_app_purchases = Some(purchases.has_in_app_purchases);
     app.has_external_purchases = Some(purchases.has_external_purchases);
     app.in_app_purchases = Some(purchases.purchases);
@@ -149,6 +153,7 @@ pub(super) fn parse(json: &Value) -> ParseBatch<LookupApp> {
             categories: strings(value, "genres"),
             category_ids: strings(value, "genreIds"),
             seller_name: text(value, "sellerName"),
+            developer_website_url: text(value, "sellerUrl"),
             app_store_url: text(value, "trackViewUrl"),
             icon_url: text(value, "artworkUrl512").or_else(|| text(value, "artworkUrl100")),
             screenshots: strings(value, "screenshotUrls"),
@@ -165,6 +170,42 @@ pub(super) fn parse(json: &Value) -> ParseBatch<LookupApp> {
             similar_apps: None,
         })
     })
+}
+
+fn developer_website_url(data: &Value) -> Option<String> {
+    match data {
+        Value::Array(values) => values.iter().find_map(developer_website_url),
+        Value::Object(object) => {
+            let is_developer_website = ["title", "label", "name", "text"]
+                .iter()
+                .filter_map(|key| object.get(*key).and_then(Value::as_str))
+                .any(|label| label.to_ascii_lowercase().contains("developer website"));
+            if is_developer_website {
+                ["actionUrl", "url", "href", "websiteUrl"]
+                    .iter()
+                    .filter_map(|key| object.get(*key))
+                    .find_map(external_http_url)
+                    .or_else(|| object.values().find_map(external_http_url))
+            } else {
+                object.values().find_map(developer_website_url)
+            }
+        }
+        _ => None,
+    }
+}
+
+fn external_http_url(value: &Value) -> Option<String> {
+    match value {
+        Value::String(url)
+            if (url.starts_with("https://") || url.starts_with("http://"))
+                && !url.contains("apps.apple.com") =>
+        {
+            Some(url.clone())
+        }
+        Value::Array(values) => values.iter().find_map(external_http_url),
+        Value::Object(object) => object.values().find_map(external_http_url),
+        _ => None,
+    }
 }
 
 fn screenshots(data: &Value) -> Vec<String> {
@@ -233,5 +274,21 @@ mod tests {
             }
         });
         assert_eq!(screenshots(&data), ["https://example.com/720x1564bb.jpg"]);
+    }
+
+    #[test]
+    fn parses_developer_website_from_product_page() {
+        let data = json!({
+            "items": [{
+                "title": "Developer Website",
+                "action": {
+                    "url": "https://example.com/product"
+                }
+            }]
+        });
+        assert_eq!(
+            developer_website_url(&data).as_deref(),
+            Some("https://example.com/product")
+        );
     }
 }

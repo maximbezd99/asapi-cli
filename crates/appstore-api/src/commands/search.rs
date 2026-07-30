@@ -1,9 +1,10 @@
 use anyhow::{bail, Result};
+use chrono::{DateTime, FixedOffset};
 use reqwest::Url;
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use super::{envelope, parse_result_array, strings, text, u32_field, ParseBatch};
+use super::{date, envelope, parse_result_array, strings, text, u32_field, ParseBatch};
 use crate::{
     app_store::resolve_country, client::ApiClient, output::Envelope, requests::SearchRequest,
 };
@@ -29,6 +30,8 @@ pub struct SearchApp {
     pub seller_name: Option<String>,
     pub app_store_url: Option<String>,
     pub icon_url: Option<String>,
+    pub released_at: Option<DateTime<FixedOffset>>,
+    pub version_released_at: Option<DateTime<FixedOffset>>,
 }
 
 pub async fn run(client: &ApiClient, args: &SearchRequest) -> Result<Envelope> {
@@ -112,6 +115,8 @@ fn parse(json: &Value) -> ParseBatch<SearchApp> {
             seller_name: text(value, "sellerName"),
             app_store_url: text(value, "trackViewUrl"),
             icon_url: text(value, "artworkUrl512").or_else(|| text(value, "artworkUrl100")),
+            released_at: date(value, "releaseDate"),
+            version_released_at: date(value, "currentVersionReleaseDate"),
         })
     })
 }

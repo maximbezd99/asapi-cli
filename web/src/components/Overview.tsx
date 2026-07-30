@@ -1,4 +1,5 @@
-import { ArrowUpRight, Globe2, Star } from "lucide-react";
+import { useState } from "react";
+import { ArrowUpRight, Expand, Globe2, Star } from "lucide-react";
 import {
   countryFlag,
   countryLabel,
@@ -7,8 +8,10 @@ import {
   relativeTime,
 } from "../format";
 import type { AppView } from "../types";
+import ScreenshotViewer from "./ScreenshotViewer";
 
 export default function Overview({ view }: { view: AppView | null }) {
+  const [screenshotIndex, setScreenshotIndex] = useState<number | null>(null);
   const details = view?.details?.data[0];
   if (!view || !details) {
     return (
@@ -31,8 +34,27 @@ export default function Overview({ view }: { view: AppView | null }) {
             <span>{details.screenshots.length}</span>
           </div>
           <div className="screenshots">
-            {details.screenshots.map((screenshot) => (
-              <img src={screenshot} alt="" key={screenshot} loading="lazy" />
+            {details.screenshots.map((screenshot, index) => (
+              <button
+                type="button"
+                className="screenshot-thumb"
+                style={{ aspectRatio: screenshotAspectRatio(screenshot) }}
+                onClick={() => setScreenshotIndex(index)}
+                aria-label={`Open screenshot ${index + 1} of ${
+                  details.screenshots?.length ?? 0
+                }`}
+                key={screenshot}
+              >
+                <img
+                  src={screenshot}
+                  alt=""
+                  loading={index < 3 ? "eager" : "lazy"}
+                />
+                <span>
+                  <Expand size={12} />
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+              </button>
             ))}
           </div>
         </section>
@@ -169,8 +191,25 @@ export default function Overview({ view }: { view: AppView | null }) {
           {details.description ?? "No description is available."}
         </p>
       </section>
+
+      {screenshotIndex != null && details.screenshots?.length ? (
+        <ScreenshotViewer
+          images={details.screenshots}
+          initialIndex={screenshotIndex}
+          appName={details.name}
+          onClose={() => setScreenshotIndex(null)}
+        />
+      ) : null}
     </div>
   );
+}
+
+function screenshotAspectRatio(url: string) {
+  const match = url.match(/\/(\d+)x(\d+)(?:bb|cc|sc)?\.[a-z]+(?:\?|$)/i);
+  if (!match) return "9 / 19.5";
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  return width > 0 && height > 0 ? `${width} / ${height}` : "9 / 19.5";
 }
 
 function Fact({

@@ -130,6 +130,10 @@ pub struct RankedApp {
     pub name: String,
     pub icon_url: Option<String>,
     pub developer_name: Option<String>,
+    pub released_at: Option<String>,
+    pub version_released_at: Option<String>,
+    pub rating: Option<f64>,
+    pub rating_count: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -178,6 +182,8 @@ pub struct UpdateKeyword {
 #[derive(Debug, Deserialize, Default)]
 pub struct RefreshApp {
     pub country: Option<String>,
+    #[serde(default)]
+    pub all: bool,
 }
 
 #[derive(Debug, Deserialize, Default)]

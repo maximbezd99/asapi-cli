@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import {
   Check,
-  ChevronDown,
   Copy,
-  ExternalLink,
+  Globe2,
   Plus,
   RefreshCw,
   Settings2,
@@ -29,7 +28,9 @@ import type {
 } from "../types";
 import KeywordsTable from "./KeywordsTable";
 import Overview from "./Overview";
+import Picker from "./Picker";
 import ReviewsPanel from "./ReviewsPanel";
+import ConfirmDialog from "./ConfirmDialog";
 
 interface Props {
   project: Project;
@@ -52,6 +53,8 @@ export default function AppPage({
   const [view, setView] = useState<AppView | null>(null);
   const [keywords, setKeywords] = useState<Keyword[]>([]);
   const [tab, setTab] = useState<AppTab>("overview");
+  const [reviewCountry, setReviewCountry] = useState(app.main_country);
+  const [keywordCountryFilter, setKeywordCountryFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -61,8 +64,16 @@ export default function AppPage({
   const [storefrontAutoRefresh, setStorefrontAutoRefresh] = useState(false);
   const [storefrontBusy, setStorefrontBusy] = useState(false);
   const [appIdCopied, setAppIdCopied] = useState(false);
+  const [deleteAppDialog, setDeleteAppDialog] = useState(false);
+  const [deletingApp, setDeletingApp] = useState(false);
+  const [fallbackDeveloperWebsiteUrl, setFallbackDeveloperWebsiteUrl] =
+    useState<string | null>(null);
+  const [websiteLookupState, setWebsiteLookupState] = useState<
+    "idle" | "loading" | "unavailable"
+  >("idle");
   const automaticRefreshes = useRef(new Set<string>());
   const copyReset = useRef<number | null>(null);
+  const details = view?.details?.data[0];
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -92,17 +103,52 @@ export default function AppPage({
   }, [view?.review_summary.count]);
 
   useEffect(() => {
+    setFallbackDeveloperWebsiteUrl(null);
+    if (!details || details.developer_website_url) {
+      setWebsiteLookupState("idle");
+      return;
+    }
+    let cancelled = false;
+    setWebsiteLookupState("loading");
+    api
+      .lookupApp(app.apple_id, country)
+      .then((lookup) => {
+        if (cancelled) return;
+        if (lookup?.developer_website_url) {
+          setFallbackDeveloperWebsiteUrl(lookup.developer_website_url);
+          setWebsiteLookupState("idle");
+        } else {
+          setWebsiteLookupState("unavailable");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setWebsiteLookupState("unavailable");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [app.apple_id, country, details?.developer_website_url, Boolean(details)]);
+
+  const refreshAndReload = useCallback(
+    async (all = false) => {
+      await api.refreshApp(project.id, app.apple_id, all ? { all: true } : {});
+      const nextView = await api.app(project.id, app.apple_id, country);
+      setView(nextView);
+      await onAppChanged();
+    },
+    [app.apple_id, country, onAppChanged, project.id],
+  );
+
+  useEffect(() => {
     if (!view || !isStale(view.details_updated_at)) return;
-    const key = `${project.id}:${app.apple_id}:${country}`;
+    const key = `${project.id}:${app.apple_id}`;
     if (automaticRefreshes.current.has(key)) return;
     automaticRefreshes.current.add(key);
     setRefreshing(true);
-    api
-      .refreshApp(project.id, app.apple_id, country)
-      .then(setView)
+    refreshAndReload()
       .catch((reason: Error) => setError(reason.message))
       .finally(() => setRefreshing(false));
-  }, [view, project.id, app.apple_id, country]);
+  }, [app.apple_id, project.id, refreshAndReload, view]);
 
   useEffect(() => {
     if (tab !== "keywords") return;
@@ -116,7 +162,7 @@ export default function AppPage({
     setRefreshing(true);
     setError("");
     try {
-      setView(await api.refreshApp(project.id, app.apple_id, country));
+      await refreshAndReload(true);
       if (tab === "keywords") {
         setKeywords(await api.keywords(project.id, app.apple_id));
       }
@@ -124,6 +170,19 @@ export default function AppPage({
       setError((reason as Error).message);
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const deleteApp = async () => {
+    setDeletingApp(true);
+    setError("");
+    try {
+      await api.deleteApp(project.id, app.apple_id);
+      setDeleteAppDialog(false);
+      await onAppChanged();
+    } catch (reason) {
+      setError((reason as Error).message);
+      setDeletingApp(false);
     }
   };
 
@@ -209,7 +268,12 @@ export default function AppPage({
         app.apple_id,
         storefrontCountryCode,
       );
-      await reloadStorefronts();
+      const fallbackCountry = view?.storefronts.find(
+        (storefront) => storefront.is_main,
+      )?.country;
+      await reloadStorefronts(
+        storefrontCountryCode === country ? fallbackCountry : undefined,
+      );
     } catch (reason) {
       setError((reason as Error).message);
     } finally {
@@ -217,7 +281,8 @@ export default function AppPage({
     }
   };
 
-  const details = view?.details?.data[0];
+  const developerWebsiteUrl =
+    details?.developer_website_url ?? fallbackDeveloperWebsiteUrl;
   const availableCountries = countries.filter(
     (item) =>
       !view?.storefronts.some((storefront) => storefront.country === item.code),
@@ -225,6 +290,32 @@ export default function AppPage({
   const availableCountryCodes = availableCountries
     .map((item) => item.code)
     .join(",");
+  const headerStorefrontOptions = useMemo(
+    () =>
+      (view?.storefronts ?? []).map((storefront) => ({
+        value: storefront.country,
+        label: countryLabel(storefront.country),
+        triggerLabel: `${storefront.country.toUpperCase()}${
+          storefront.is_main ? " · Main" : ""
+        }`,
+        meta: `${storefront.country.toUpperCase()}${
+          storefront.is_main ? " · Main" : ""
+        }`,
+        icon: countryFlag(storefront.country),
+      })),
+    [view?.storefronts],
+  );
+  const availableStorefrontOptions = useMemo(
+    () =>
+      availableCountries.map((item) => ({
+        value: item.code,
+        label: item.name,
+        triggerLabel: item.code.toUpperCase(),
+        meta: item.code.toUpperCase(),
+        icon: countryFlag(item.code),
+      })),
+    [availableCountryCodes],
+  );
 
   useEffect(() => {
     if (!availableCountries.length) return;
@@ -232,6 +323,20 @@ export default function AppPage({
       setStorefrontCountry(availableCountries[0].code);
     }
   }, [availableCountryCodes, storefrontCountry]);
+
+  useEffect(() => {
+    const configured = view?.storefronts ?? [];
+    if (!configured.length) return;
+    if (
+      reviewCountry !== "all" &&
+      !configured.some((storefront) => storefront.country === reviewCountry)
+    ) {
+      setReviewCountry(
+        configured.find((storefront) => storefront.is_main)?.country ??
+          configured[0].country,
+      );
+    }
+  }, [reviewCountry, view?.storefronts]);
 
   const handleTabKeyDown = (
     event: KeyboardEvent<HTMLButtonElement>,
@@ -297,27 +402,21 @@ export default function AppPage({
         </div>
 
         <div className="header-actions">
-          <label className="country-select">
-            <span>{countryFlag(country)}</span>
-            <select
-              value={country}
-              onChange={(event) => setCountry(event.target.value)}
-              disabled={!view}
-            >
-              {view?.storefronts.map((storefront) => (
-                <option key={storefront.country} value={storefront.country}>
-                  {countryLabel(storefront.country)}
-                  {storefront.is_main ? " · Main" : ""}
-                </option>
-              ))}
-            </select>
-            <ChevronDown size={14} />
-          </label>
+          <Picker
+            value={country}
+            options={headerStorefrontOptions}
+            onChange={setCountry}
+            ariaLabel="Overview storefront"
+            className="header-country-picker"
+            disabled={!view}
+            searchPlaceholder="Search storefronts"
+          />
           <button
             className="icon-button"
             onClick={() => void refresh()}
             disabled={refreshing}
-            title="Refresh this storefront"
+            title="Refresh every storefront"
+            aria-label="Refresh every storefront"
           >
             <RefreshCw className={refreshing ? "spinning" : ""} size={17} />
           </button>
@@ -336,10 +435,55 @@ export default function AppPage({
               target="_blank"
               rel="noreferrer"
               title="Open in the App Store"
+              aria-label="Open in the App Store"
             >
-              <ExternalLink size={17} />
+              <AppStoreMark />
             </a>
           ) : null}
+          {developerWebsiteUrl ? (
+            <a
+              className="icon-button"
+              href={developerWebsiteUrl}
+              target="_blank"
+              rel="noreferrer"
+              title="Open developer website"
+              aria-label="Open developer website"
+            >
+              <Globe2 size={17} />
+            </a>
+          ) : details ? (
+            <button
+              className="icon-button"
+              type="button"
+              disabled
+              title={
+                websiteLookupState === "loading"
+                  ? "Finding developer website"
+                  : "Developer website unavailable"
+              }
+              aria-label={
+                websiteLookupState === "loading"
+                  ? "Finding developer website"
+                  : "Developer website unavailable"
+              }
+            >
+              <Globe2
+                className={
+                  websiteLookupState === "loading" ? "spinning" : undefined
+                }
+                size={17}
+              />
+            </button>
+          ) : null}
+          <button
+            className="icon-button app-delete-button"
+            type="button"
+            title="Delete app from project"
+            aria-label="Delete app from project"
+            onClick={() => setDeleteAppDialog(true)}
+          >
+            <Trash2 size={16} />
+          </button>
         </div>
       </header>
 
@@ -349,17 +493,15 @@ export default function AppPage({
             <strong>Add storefront</strong>
             <label>
               <span>Country</span>
-              <select
+              <Picker
                 value={storefrontCountry}
-                onChange={(event) => setStorefrontCountry(event.target.value)}
+                options={availableStorefrontOptions}
+                onChange={setStorefrontCountry}
+                ariaLabel="New storefront country"
+                className="storefront-country-picker"
                 disabled={!availableCountries.length || storefrontBusy}
-              >
-                {availableCountries.map((item) => (
-                  <option key={item.code} value={item.code}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
+                searchPlaceholder="Search countries"
+              />
             </label>
             <label className="check-control">
               <input
@@ -518,19 +660,56 @@ export default function AppPage({
               appId={app.apple_id}
               keywords={keywords}
               storefronts={view?.storefronts ?? []}
+              countryFilter={keywordCountryFilter}
+              onCountryFilterChange={setKeywordCountryFilter}
               onChange={setKeywords}
             />
           ) : (
             <ReviewsPanel
               projectId={project.id}
               appId={app.apple_id}
-              country={country}
-              summary={view?.review_summary}
+              country={reviewCountry}
+              storefronts={view?.storefronts ?? []}
+              summary={
+                reviewCountry === view?.selected_country
+                  ? view?.review_summary
+                  : undefined
+              }
+              onCountryChange={setReviewCountry}
               onTotalChange={setReviewCount}
             />
           )}
         </section>
       </div>
+      {deleteAppDialog ? (
+        <ConfirmDialog
+          title="Delete app from this project?"
+          description={`“${
+            details?.name ?? app.name ?? app.apple_id
+          }” and its stored snapshots, reviews, storefronts, and keywords will be permanently removed from ${project.name}.`}
+          confirmLabel="Delete app"
+          busy={deletingApp}
+          onCancel={() => {
+            if (!deletingApp) setDeleteAppDialog(false);
+          }}
+          onConfirm={() => void deleteApp()}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function AppStoreMark() {
+  return (
+    <svg
+      className="app-store-mark"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M8.2 18.5 14.4 7.7" />
+      <path d="m10.4 5.5 7.5 13" />
+      <path d="M5.1 15.1h13.8" />
+    </svg>
   );
 }

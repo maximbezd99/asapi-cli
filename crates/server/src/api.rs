@@ -174,9 +174,13 @@ async fn refresh_app(
     Path((project_id, app_id)): Path<(String, i64)>,
     Json(input): Json<RefreshApp>,
 ) -> ApiResult<Json<Value>> {
-    service
-        .refresh_app(&project_id, app_id, input.country.as_deref())
-        .await?;
+    if input.all {
+        service.refresh_all_storefronts(&project_id, app_id).await?;
+    } else {
+        service
+            .refresh_app(&project_id, app_id, input.country.as_deref())
+            .await?;
+    }
     let app = service
         .app_view(&project_id, app_id, input.country.as_deref())
         .await?;

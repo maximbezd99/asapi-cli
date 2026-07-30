@@ -1,7 +1,9 @@
 import type {
+  AppDetails,
   AppSummary,
   AppView,
   Country,
+  Envelope,
   Keyword,
   Project,
   ReviewsPage,
@@ -86,16 +88,37 @@ export const api = {
       )
     ).data,
 
-  refreshApp: async (projectId: string, appId: number, country: string) =>
+  refreshApp: async (
+    projectId: string,
+    appId: number,
+    options: { country?: string; all?: boolean } = {},
+  ) =>
     (
       await request<ResponseEnvelope<AppView>>(
         `/api/v1/projects/${projectId}/apps/${appId}/refresh`,
         {
           method: "POST",
-          body: JSON.stringify({ country }),
+          body: JSON.stringify(options),
         },
       )
     ).data,
+
+  deleteApp: async (projectId: string, appId: number) =>
+    await request<void>(`/api/v1/projects/${projectId}/apps/${appId}`, {
+      method: "DELETE",
+    }),
+
+  lookupApp: async (appId: number, country: string) =>
+    (
+      await request<Envelope<AppDetails[]>>("/api/v1/query/lookup", {
+        method: "POST",
+        body: JSON.stringify({
+          apps: [{ id: appId }],
+          country,
+          full: false,
+        }),
+      })
+    ).data[0] ?? null,
 
   reviews: async (
     projectId: string,
@@ -119,12 +142,28 @@ export const api = {
       )
     ).data,
 
+  refreshKeywords: async (
+    projectId: string,
+    appId: number,
+    queryId: number,
+    force = false,
+  ) =>
+    (
+      await request<ResponseEnvelope<Keyword[]>>(
+        `/api/v1/projects/${projectId}/apps/${appId}/keywords/refresh`,
+        {
+          method: "POST",
+          body: JSON.stringify({ query_id: queryId, force }),
+        },
+      )
+    ).data,
+
   addKeyword: async (
     projectId: string,
     appId: number,
     keyword: string,
     country: string,
-    notes: string,
+    notes = "",
   ) =>
     (
       await request<ResponseEnvelope<Keyword>>(

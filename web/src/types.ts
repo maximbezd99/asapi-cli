@@ -53,6 +53,7 @@ export interface AppDetails {
   release_notes?: string;
   categories?: string[];
   seller_name?: string;
+  developer_website_url?: string;
   app_store_url?: string;
   icon_url?: string;
   screenshots?: string[];
@@ -153,6 +154,10 @@ export interface RankedApp {
   name: string;
   icon_url: string | null;
   developer_name: string | null;
+  released_at: string | null;
+  version_released_at: string | null;
+  rating: number | null;
+  rating_count: number | null;
 }
 
 export interface TrendPoint {

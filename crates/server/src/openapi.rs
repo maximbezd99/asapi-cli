@@ -253,7 +253,14 @@ fn schemas() -> Value {
             &["app_id"]
         ),
         "RefreshApp": object(
-            json!({"country": {"type": ["string", "null"]}}),
+            json!({
+                "country": {"type": ["string", "null"]},
+                "all": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Refresh every configured storefront instead of the main and automatic storefronts."
+                }
+            }),
             &[]
         ),
         "AddStorefront": object(

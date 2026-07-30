@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-07-30T20:27:00Z",
+  "generatedAt": "2026-07-30T21:30:00Z",
   "title": "Design System: asapi",
   "extensions": {
     "colorMeta": {
@@ -102,10 +102,10 @@
       }
     },
     "typographyMeta": {
-      "display": {"displayName": "Instruction Display", "purpose": "Large empty-project guidance only."},
-      "headline": {"displayName": "App Headline", "purpose": "Selected app identity."},
-      "title": {"displayName": "Register Title", "purpose": "Panel and register headings."},
-      "body": {"displayName": "Research Body", "purpose": "Descriptions and review content."},
+      "display": {"displayName": "Mono Instruction Display", "purpose": "Large empty-project guidance only."},
+      "headline": {"displayName": "Mono App Headline", "purpose": "Selected app identity."},
+      "title": {"displayName": "Mono Register Title", "purpose": "Panel and register headings."},
+      "body": {"displayName": "Mono Research Body", "purpose": "Descriptions and review content."},
       "label": {"displayName": "Technical Label", "purpose": "Metadata, counts, states, and table headers."}
     },
     "shadows": [
@@ -115,6 +115,7 @@
     ],
     "motion": [
       {"name": "state-change", "value": "120ms ease-out", "purpose": "Hover, press, color, and hard-shadow transitions."},
+      {"name": "picker-register", "value": "150ms cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "Searchable picker register reveal using clipped mechanical motion."},
       {"name": "refresh-step", "value": "0.9s steps(8, end)", "purpose": "Mechanical refresh rotation."},
       {"name": "registry-pulse", "value": "1.1s steps(2, end)", "purpose": "Loading-cell opacity pulse."},
       {"name": "reduced-motion", "value": "0.01ms; 1 iteration", "purpose": "Effectively removes animation and transition for reduced-motion users."}
@@ -127,12 +128,12 @@
   },
   "components": [
     {
-      "name": "Register Select",
+      "name": "Register Picker",
       "kind": "input",
       "refersTo": "select-register",
-      "description": "Project or storefront selection inside a square raised wrapper.",
-      "html": "<label class=\"ds-register-select\"><span>PROJECT</span><select><option>Default</option></select><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m6 9 6 6 6-6\"/></svg></label>",
-      "css": ".ds-register-select{position:relative;display:flex;height:36px;align-items:center;gap:8px;padding:0 29px 0 9px;border:1px solid var(--ink);background:var(--paper-bright);box-shadow:2px 2px 0 var(--shadow);color:var(--ink);font-family:var(--font-data);font-size:9px;font-weight:700}.ds-register-select>span{position:absolute;left:0;top:-17px;color:var(--ink-soft);letter-spacing:.06em}.ds-register-select select{width:100%;border:0;appearance:none;background:transparent;color:inherit;font:inherit;outline:0}.ds-register-select svg{position:absolute;right:8px;width:14px;fill:none;stroke:currentColor;stroke-width:2;pointer-events:none}.ds-register-select:focus-within{outline:2px solid var(--ink);outline-offset:2px}"
+      "description": "Full-face custom project or storefront picker with searchable ruled option register.",
+      "html": "<div class=\"ds-register-picker\"><button type=\"button\" aria-haspopup=\"listbox\" aria-expanded=\"true\">PROJECT <svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m6 9 6 6 6-6\"/></svg></button><div role=\"listbox\"><label><input aria-label=\"Search projects\" autofocus></label><button role=\"option\" aria-selected=\"true\">Default</button></div></div>",
+      "css": ".ds-register-picker{position:relative;display:inline-flex;font-family:var(--font-data);font-size:9px;font-weight:700}.ds-register-picker>button{display:flex;width:100%;height:36px;align-items:center;justify-content:space-between;gap:8px;padding:0 9px;border:1px solid var(--ink);background:var(--paper-bright);box-shadow:2px 2px 0 var(--shadow);color:var(--ink);font:inherit}.ds-register-picker>[role=listbox]{position:absolute;top:40px;z-index:10;min-width:220px;border:2px solid var(--ink);background:var(--paper-bright);box-shadow:3px 3px 0 var(--shadow)}.ds-register-picker input{height:29px;margin:6px;border:1px solid var(--ink);background:var(--paper-bright);font:inherit}.ds-register-picker [role=option]{display:block;width:100%;min-height:39px;border:0;border-bottom:1px solid var(--rule-soft);background:var(--paper-bright);font:inherit;text-align:left}.ds-register-picker [aria-selected=true]{background:var(--ink);color:var(--paper-bright)}.ds-register-picker :focus-visible{outline:2px solid var(--ink);outline-offset:2px}"
     },
     {
       "name": "Icon Action",
@@ -180,7 +181,7 @@
     "overview": "asapi uses muted technical-ledger neobrutalism: warm paper fields, near-black ink, square geometry, ruled registers, compact technical labels, and scarce low-chroma signals. The interface should feel like maintained working evidence, not a generic SaaS dashboard or an analytics gallery.\n\nThe visual system serves an agent-populated research workflow with compact human controls for projects, apps, storefronts, and keywords. Dense information stays trustworthy through explicit storefront and freshness context, stable tabular alignment, and direct state language. Expressive detail is limited to registration-dot textures, hatched unavailable cells, and hard-offset depth where an object is genuinely actionable or lifted.",
     "keyCharacteristics": [
       "Warm paper surfaces separated by dark, mechanically precise rules.",
-      "Arial for readable content and system monospace for metadata, counts, and state.",
+      "System monospace throughout, with hierarchy carried by size, weight, case, and rules.",
       "Square controls and containers with compact, consistent working density.",
       "Overview, Keywords, and Reviews presented as equal working registers.",
       "Muted ochre, olive, oxide, and slate used as scarce semantic signals.",
@@ -189,7 +190,7 @@
     "rules": [
       {"name": "The Paper Dominance Rule", "body": "Neutral paper and ink own the screen; semantic colors annotate evidence and state rather than filling large regions.", "section": "colors"},
       {"name": "The Source Color Rule", "body": "App icons and country flags remain unfiltered because they are evidence, not decoration.", "section": "colors"},
-      {"name": "The Two-Voice Rule", "body": "Use Arial for the subject matter and monospace for the system speaking about that subject.", "section": "typography"},
+      {"name": "The Mono Ledger Rule", "body": "Use the system monospace stack everywhere; do not introduce a separate sans-serif voice.", "section": "typography"},
       {"name": "The Density Rule", "body": "Hierarchy comes from weight, family, case, and rules—not oversized dashboard typography.", "section": "typography"},
       {"name": "The Context-Before-Content Rule", "body": "Project, app, storefront, and freshness state remain ahead of the selected register at every width.", "section": "layout"},
       {"name": "The Review Scroll Rule", "body": "The review list uses the document viewport on mobile and an internal list viewport on desktop; individual long review bodies remain bounded and expose a thin square scrollbar.", "section": "layout"},

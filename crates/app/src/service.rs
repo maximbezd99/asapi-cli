@@ -50,6 +50,8 @@ struct AppSummaryRow {
     main_country: String,
     payload_json: Option<String>,
     last_updated: Option<String>,
+    popularity_rating: Option<f64>,
+    popularity_rating_count: Option<i64>,
 }
 
 #[derive(FromRow)]
@@ -80,6 +82,51 @@ impl AppService {
     pub async fn list_apps(&self, project_id: &str) -> Result<Vec<TrackedAppSummary>> {
         let project = self.manager.get(project_id).await?;
         let rows = sqlx::query_as::<_, AppSummaryRow>(indoc! {r#"
+            WITH latest_popularity AS (
+                SELECT runs.app_id, runs.id
+                FROM popularity_runs runs
+                WHERE runs.id = (
+                    SELECT latest.id
+                    FROM popularity_runs latest
+                    WHERE latest.app_id = runs.app_id
+                    ORDER BY latest.fetched_at DESC
+                    LIMIT 1
+                )
+            ),
+            popularity_totals AS (
+                SELECT
+                    latest.app_id,
+                    SUM(
+                        CASE
+                            WHEN observations.available = 1
+                            THEN COALESCE(observations.rating_count, 0)
+                            ELSE 0
+                        END
+                    ) AS popularity_rating_count,
+                    SUM(
+                        CASE
+                            WHEN observations.available = 1
+                             AND observations.rating IS NOT NULL
+                            THEN observations.rating
+                               * COALESCE(observations.rating_count, 0)
+                            ELSE 0
+                        END
+                    ) / NULLIF(
+                        SUM(
+                            CASE
+                                WHEN observations.available = 1
+                                 AND observations.rating IS NOT NULL
+                                THEN COALESCE(observations.rating_count, 0)
+                                ELSE 0
+                            END
+                        ),
+                        0
+                    ) AS popularity_rating
+                FROM latest_popularity latest
+                JOIN popularity_observations observations
+                  ON observations.run_id = latest.id
+                GROUP BY latest.app_id
+            )
             SELECT
                 a.apple_id,
                 a.created_at,
@@ -99,11 +146,15 @@ impl AppService {
                       AND snapshots.country = sf.country
                     ORDER BY snapshots.fetched_at DESC
                     LIMIT 1
-                ) AS last_updated
+                ) AS last_updated,
+                totals.popularity_rating,
+                totals.popularity_rating_count
             FROM apps a
             JOIN app_storefronts sf
               ON sf.app_id = a.id
              AND sf.is_main = 1
+            LEFT JOIN popularity_totals totals
+              ON totals.app_id = a.id
             ORDER BY
                 COALESCE(
                     json_extract(payload_json, '$.data[0].name'),
@@ -122,18 +173,23 @@ impl AppService {
                     .map(serde_json::from_str::<Value>)
                     .transpose()?;
                 let data = payload.as_ref().and_then(|value| value.pointer("/data/0"));
+                let main_rating = data
+                    .and_then(|value| value.get("rating"))
+                    .and_then(Value::as_f64);
+                let main_rating_count = data
+                    .and_then(|value| value.get("rating_count"))
+                    .and_then(Value::as_i64);
                 Ok(TrackedAppSummary {
                     apple_id: row.apple_id,
                     created_at: row.created_at,
                     main_country: row.main_country,
                     name: string_at(data, "/name"),
                     icon_url: string_at(data, "/icon_url"),
-                    rating: data
-                        .and_then(|value| value.get("rating"))
-                        .and_then(Value::as_f64),
-                    rating_count: data
-                        .and_then(|value| value.get("rating_count"))
-                        .and_then(Value::as_i64),
+                    rating: row.popularity_rating.or(main_rating),
+                    rating_count: row
+                        .popularity_rating_count
+                        .filter(|count| *count > 0)
+                        .or(main_rating_count),
                     version: string_at(data, "/version"),
                     last_updated: row.last_updated,
                 })
@@ -494,6 +550,21 @@ impl AppService {
         app_id: i64,
         country: Option<&str>,
     ) -> Result<()> {
+        self.refresh_app_scope(project_id, app_id, country, false)
+            .await
+    }
+
+    pub async fn refresh_all_storefronts(&self, project_id: &str, app_id: i64) -> Result<()> {
+        self.refresh_app_scope(project_id, app_id, None, true).await
+    }
+
+    async fn refresh_app_scope(
+        &self,
+        project_id: &str,
+        app_id: i64,
+        country: Option<&str>,
+        all_storefronts: bool,
+    ) -> Result<()> {
         let project = self.manager.get(project_id).await?;
         let app = find_app(&project.pool, app_id).await?;
         let countries = match country {
@@ -504,12 +575,14 @@ impl AppService {
             }
             None => {
                 sqlx::query_scalar::<_, String>(indoc! {r#"
-                SELECT country
-                FROM app_storefronts
-                WHERE app_id = ? AND (is_main = 1 OR auto_refresh = 1)
-                ORDER BY is_main DESC, country
-            "#})
+                    SELECT country
+                    FROM app_storefronts
+                    WHERE app_id = ?
+                      AND (? = 1 OR is_main = 1 OR auto_refresh = 1)
+                    ORDER BY is_main DESC, country
+                "#})
                 .bind(app.id)
+                .bind(all_storefronts)
                 .fetch_all(&project.pool)
                 .await?
             }
@@ -1147,7 +1220,36 @@ impl AppService {
         .fetch_optional(&project.pool)
         .await?;
         if !force && latest.as_deref().is_some_and(|value| !is_stale(value)) {
-            return Ok(());
+            let has_legacy_result_shape = sqlx::query_scalar::<_, bool>(indoc! {r#"
+                    SELECT
+                        EXISTS (
+                            SELECT 1
+                            FROM keyword_results results
+                            WHERE results.run_id = runs.id
+                        )
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM keyword_results results
+                            WHERE results.run_id = runs.id
+                              AND (
+                                  results.released_at IS NOT NULL
+                                  OR results.version_released_at IS NOT NULL
+                                  OR results.rating IS NOT NULL
+                                  OR results.rating_count IS NOT NULL
+                              )
+                        )
+                    FROM keyword_query_runs runs
+                    WHERE runs.query_id = ?
+                    ORDER BY runs.fetched_at DESC
+                    LIMIT 1
+                "#})
+            .bind(query_id)
+            .fetch_optional(&project.pool)
+            .await?
+            .unwrap_or(false);
+            if !has_legacy_result_shape {
+                return Ok(());
+            }
         }
         let row = sqlx::query(indoc! {r#"
             SELECT query, country
@@ -1189,9 +1291,13 @@ impl AppService {
                     apple_id,
                     name,
                     icon_url,
-                    developer_name
+                    developer_name,
+                    released_at,
+                    version_released_at,
+                    rating,
+                    rating_count
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#})
             .bind(run_id)
             .bind(required_i64(record, "position")?)
@@ -1199,6 +1305,10 @@ impl AppService {
             .bind(required_string(record, "name")?)
             .bind(optional_string(record, "icon_url"))
             .bind(optional_string(record, "developer_name"))
+            .bind(optional_string(record, "released_at"))
+            .bind(optional_string(record, "version_released_at"))
+            .bind(record.get("rating").and_then(Value::as_f64))
+            .bind(record.get("rating_count").and_then(Value::as_i64))
             .execute(&mut *tx)
             .await?;
         }
@@ -1466,11 +1576,14 @@ async fn keyword_view(
                     apple_id,
                     name,
                     icon_url,
-                    developer_name
+                    developer_name,
+                    released_at,
+                    version_released_at,
+                    rating,
+                    rating_count
                 FROM keyword_results
                 WHERE run_id = ?
                 ORDER BY position
-                LIMIT 5
             "#})
             .bind(run_id)
             .fetch_all(pool)

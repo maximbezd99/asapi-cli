@@ -20,25 +20,25 @@ colors:
   shadow: "#777872"
 typography:
   display:
-    fontFamily: 'Arial, "Helvetica Neue", Helvetica, sans-serif'
+    fontFamily: 'ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace'
     fontSize: "34px"
     fontWeight: 700
     lineHeight: 1.02
     letterSpacing: "-0.03em"
   headline:
-    fontFamily: 'Arial, "Helvetica Neue", Helvetica, sans-serif'
+    fontFamily: 'ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace'
     fontSize: "28px"
     fontWeight: 800
     lineHeight: 1
     letterSpacing: "-0.03em"
   title:
-    fontFamily: 'Arial, "Helvetica Neue", Helvetica, sans-serif'
+    fontFamily: 'ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace'
     fontSize: "13px"
     fontWeight: 800
     lineHeight: 1.2
     letterSpacing: "-0.01em"
   body:
-    fontFamily: 'Arial, "Helvetica Neue", Helvetica, sans-serif'
+    fontFamily: 'ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace'
     fontSize: "12px"
     fontWeight: 400
     lineHeight: 1.6
@@ -108,7 +108,7 @@ The visual system serves an agent-populated research workflow with compact human
 **Key Characteristics:**
 
 - Warm paper surfaces separated by dark, mechanically precise rules.
-- Arial for readable content and system monospace for metadata, counts, and state.
+- System monospace throughout, with hierarchy carried by size, weight, case, and rules.
 - Square controls and containers with compact, consistent working density.
 - Overview, Keywords, and Reviews presented as equal working registers.
 - Muted ochre, olive, oxide, and slate used as scarce semantic signals.
@@ -149,11 +149,11 @@ The palette is paper-and-ink first; low-chroma signals annotate state without tu
 
 ## Typography
 
-**Display Font:** Arial (with Helvetica Neue and Helvetica fallbacks)  
-**Body Font:** Arial (with Helvetica Neue and Helvetica fallbacks)  
-**Label/Mono Font:** UI monospace (with SFMono-Regular, Menlo, and Consolas fallbacks)
+- **Display Font:** UI monospace (with SFMono-Regular, Menlo, and Consolas fallbacks)
+- **Body Font:** UI monospace (with SFMono-Regular, Menlo, and Consolas fallbacks)
+- **Label Font:** UI monospace (with SFMono-Regular, Menlo, and Consolas fallbacks)
 
-**Character:** The sans face keeps app names and review content plain and fast to read. Monospace turns counts, timestamps, storefront labels, table headers, and operational state into a consistent technical annotation layer.
+**Character:** A single monospace voice makes the whole interface read as one maintained research register. Weight, size, case, spacing, and hard rules separate app content from operational metadata.
 
 ### Hierarchy
 
@@ -163,7 +163,7 @@ The palette is paper-and-ink first; low-chroma signals annotate state without tu
 - **Body:** descriptions and review text, generally constrained to comfortable reading widths.
 - **Label:** compact metadata, statuses, counts, and column headers; usually uppercase and tracked.
 
-**The Two-Voice Rule.** Use Arial for the subject matter and monospace for the system speaking about that subject.
+**The Mono Ledger Rule.** Use the system monospace stack everywhere; do not introduce a separate sans-serif voice.
 
 **The Density Rule.** Hierarchy comes from weight, family, case, and rules—not oversized dashboard typography.
 
@@ -199,11 +199,12 @@ Dotted registration fields may identify recessed working bands. Repeating diagon
 
 ## Components
 
-### Project and storefront selectors
+### Project and storefront pickers
 
-- Native selects sit inside 36px square ruled wrappers with monospace labels, a custom chevron, and compact hard-offset depth.
-- Disabled selectors retain structure and reduce opacity.
-- A 2px ink `:focus-visible` outline with a 2px offset is the shared keyboard treatment.
+- Project and storefront controls are full-face custom buttons rather than native selects. They open a square ruled option register with the same paper, ink, and compact hard-offset depth as the trigger.
+- Registers with more than five options begin with an automatically focused search field, so opening and typing is one continuous action. Smaller registers keep direct arrow-key selection.
+- Picker triggers expose listbox state, options expose selection state, Escape closes and restores focus, and reduced-motion preference effectively removes the register reveal.
+- Disabled pickers retain structure and reduce opacity. A 2px ink `:focus-visible` outline with a 2px offset remains the shared keyboard treatment.
 
 ### Icon actions
 
@@ -227,8 +228,12 @@ Dotted registration fields may identify recessed working bands. Repeating diagon
 ### Ruled panels and registers
 
 - Overview sections use flat Bright Sheet panels with an ink border, Deep Paper heading band, and tight internal grids.
-- Keyword rows use sticky monospace headers, alternating paper tones, tabular positions, square sparklines, and Ochre Wash on hover. Preserve the full data table with horizontal scrolling instead of stacking fields into cards.
-- Review entries form a ruled two-column register on desktop and one column on mobile. Rating badges use the ochre family; metadata is separated by a dotted rule.
+- Keyword rows use sticky sortable monospace headers, alternating paper tones, tabular positions, square sparklines, and Ochre Wash on hover. Store cells stay compact as flag plus country code. Preserve the full data table with horizontal scrolling instead of stacking fields into cards.
+- Ranked-app icons are real buttons: hover gives an immediate cursor-adjacent ink tooltip, while activation opens one compact cached-fact register with optional single-lookup numbers.
+- The ranked-app register exposes its full cached result set in one searchable, focus-trapped window with release dates and storefront rating evidence.
+- Screenshot thumbnails reserve their final aspect ratio before image load and open a focus-trapped viewer with visible controls plus Left/Right arrow navigation.
+- Review entries form a ruled two-column register on desktop and one column on mobile. Rating badges use the ochre family; metadata is separated by a dotted rule. Review and keyword registers own independent storefront filters, including an explicit All option.
+- Destructive keyword removal uses a focused confirmation register. Adding the same keyword to remaining storefronts is a compact adjacent picker action.
 
 ### Loading, error, and empty states
 
