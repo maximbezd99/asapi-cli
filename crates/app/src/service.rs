@@ -9,6 +9,7 @@ use appstore_api::{
     app_store::AppSpecifier,
     commands,
     countries::validate_country,
+    market_estimates,
     requests::{LookupRequest, PopularityGroup, PopularityRequest, ReviewsRequest, SearchRequest},
     ApiClient, ClientConfig, Envelope,
 };
@@ -21,9 +22,9 @@ use tokio::sync::Mutex;
 use crate::{
     manager::{ProjectHandle, ProjectManager},
     models::{
-        AddKeyword, AppView, HistorySnapshot, KeywordTrendPoint, KeywordView, PopularityCountry,
-        PopularityView, RankedApp, Review, ReviewSummary, ReviewsPage, Storefront,
-        TrackedAppSummary, UpdateStorefront,
+        AddKeyword, AppEstimateMetric, AppEstimatesView, AppView, HistorySnapshot,
+        KeywordTrendPoint, KeywordView, PopularityCountry, PopularityView, RankedApp, Review,
+        ReviewSummary, ReviewsPage, Storefront, TrackedAppSummary, UpdateStorefront,
     },
 };
 
@@ -60,6 +61,22 @@ struct KeywordRecord {
     query: String,
     country: String,
     notes: String,
+}
+
+#[derive(FromRow)]
+struct EstimateSnapshotRow {
+    fetched_at: String,
+    downloads_value: Option<i64>,
+    downloads_rounded: Option<i64>,
+    downloads_prefix: Option<String>,
+    downloads_display: Option<String>,
+    downloads_units: Option<String>,
+    revenue_value: Option<i64>,
+    revenue_rounded: Option<i64>,
+    revenue_prefix: Option<String>,
+    revenue_display: Option<String>,
+    revenue_units: Option<String>,
+    revenue_currency: Option<String>,
 }
 
 impl AppService {
@@ -319,6 +336,7 @@ impl AppService {
             Some("similar"),
         )
         .await?;
+        let estimates = latest_app_estimates(&project.pool, app.id).await?;
         let popularity = latest_popularity(&project.pool, app.id).await?;
         let review_summary = review_summary(&project.pool, app.id, &selected_country).await?;
 
@@ -329,6 +347,7 @@ impl AppService {
             storefronts,
             details: details.as_ref().map(|(payload, _)| payload.clone()),
             details_updated_at: details.map(|(_, fetched_at)| fetched_at),
+            estimates,
             iap: iap.map(|(payload, _)| payload),
             similar: similar.map(|(payload, _)| payload),
             popularity,
@@ -367,6 +386,9 @@ impl AppService {
         if resource == "popularity" {
             return popularity_history(&project.pool, app.id).await;
         }
+        if resource == "estimates" {
+            return estimate_history(&project.pool, app.id).await;
+        }
         let country = match country {
             Some(country) => validate_country(country)?,
             None => {
@@ -396,7 +418,9 @@ impl AppService {
                 .fetch_all(&project.pool)
                 .await?
             }
-            _ => bail!("unsupported history resource '{resource}'; use details or popularity"),
+            _ => bail!(
+                "unsupported history resource '{resource}'; use details, estimates, or popularity"
+            ),
         };
         rows.into_iter()
             .map(|row| {
@@ -550,12 +574,13 @@ impl AppService {
         app_id: i64,
         country: Option<&str>,
     ) -> Result<()> {
-        self.refresh_app_scope(project_id, app_id, country, false)
+        self.refresh_app_scope(project_id, app_id, country, false, true)
             .await
     }
 
     pub async fn refresh_all_storefronts(&self, project_id: &str, app_id: i64) -> Result<()> {
-        self.refresh_app_scope(project_id, app_id, None, true).await
+        self.refresh_app_scope(project_id, app_id, None, true, true)
+            .await
     }
 
     async fn refresh_app_scope(
@@ -564,6 +589,7 @@ impl AppService {
         app_id: i64,
         country: Option<&str>,
         all_storefronts: bool,
+        refresh_estimates: bool,
     ) -> Result<()> {
         let project = self.manager.get(project_id).await?;
         let app = find_app(&project.pool, app_id).await?;
@@ -590,6 +616,19 @@ impl AppService {
 
         for country in &countries {
             self.refresh_storefront(&project, &app, country).await?;
+        }
+        if refresh_estimates {
+            if let Err(error) = self
+                .refresh_estimates(&project, &app, all_storefronts)
+                .await
+            {
+                tracing::warn!(
+                    project_id,
+                    app_id,
+                    %error,
+                    "market estimate refresh failed"
+                );
+            }
         }
         self.refresh_popularity(&project, &app).await?;
         prune_history(&project.pool).await?;
@@ -993,9 +1032,23 @@ impl AppService {
             "#})
             .fetch_all(&handle.pool)
             .await?;
+            let mut apps = Vec::with_capacity(app_ids.len());
             for app_id in app_ids {
-                if let Err(error) = self.refresh_app(&project.id, app_id, None).await {
-                    tracing::warn!(project_id = %project.id, app_id, %error, "automatic refresh failed");
+                apps.push(find_app(&handle.pool, app_id).await?);
+            }
+            if let Err(error) = self.refresh_estimates_batch(&handle, &apps, false).await {
+                tracing::warn!(
+                    project_id = %project.id,
+                    %error,
+                    "batched market estimate refresh failed"
+                );
+            }
+            for app in apps {
+                if let Err(error) = self
+                    .refresh_app_scope(&project.id, app.apple_id, None, false, false)
+                    .await
+                {
+                    tracing::warn!(project_id = %project.id, app_id = app.apple_id, %error, "automatic refresh failed");
                 }
             }
         }
@@ -1012,7 +1065,7 @@ impl AppService {
             id: u64::try_from(app.apple_id)?,
             country: None,
         };
-        let lookup = commands::lookup::run(
+        let lookup = commands::lookup::run_without_estimates(
             &self.client,
             &LookupRequest {
                 apps: vec![specifier.clone()],
@@ -1030,6 +1083,60 @@ impl AppService {
         store_snapshot(&project.pool, app.id, country, &lookup).await?;
 
         self.fetch_review_page(project, app, country, 1).await?;
+        Ok(())
+    }
+
+    async fn refresh_estimates(
+        &self,
+        project: &ProjectHandle,
+        app: &AppRecord,
+        force: bool,
+    ) -> Result<()> {
+        self.refresh_estimates_batch(project, std::slice::from_ref(app), force)
+            .await
+    }
+
+    async fn refresh_estimates_batch(
+        &self,
+        project: &ProjectHandle,
+        apps: &[AppRecord],
+        force: bool,
+    ) -> Result<()> {
+        let mut pending = Vec::with_capacity(apps.len());
+        for app in apps {
+            let latest: Option<String> = sqlx::query_scalar(indoc! {r#"
+                SELECT fetched_at
+                FROM app_estimate_snapshots
+                WHERE app_id = ?
+                ORDER BY fetched_at DESC
+                LIMIT 1
+            "#})
+            .bind(app.id)
+            .fetch_optional(&project.pool)
+            .await?;
+            if force || latest.as_deref().is_none_or(is_stale) {
+                pending.push((app.id, u64::try_from(app.apple_id)?));
+            }
+        }
+        if pending.is_empty() {
+            return Ok(());
+        }
+
+        let app_ids = pending
+            .iter()
+            .map(|(_, apple_id)| *apple_id)
+            .collect::<Vec<_>>();
+        let mut estimates = market_estimates::fetch_app_estimates(&self.client, &app_ids)
+            .await?
+            .into_iter()
+            .map(|estimate| (estimate.app_id, estimate))
+            .collect::<HashMap<_, _>>();
+        for (internal_id, apple_id) in pending {
+            let estimate = estimates.remove(&apple_id).with_context(|| {
+                format!("market data provider returned no estimates for app {apple_id}")
+            })?;
+            store_app_estimates(&project.pool, internal_id, &estimate).await?;
+        }
         Ok(())
     }
 
@@ -1366,6 +1473,130 @@ async fn store_snapshot(
     Ok(())
 }
 
+async fn store_app_estimates(
+    pool: &SqlitePool,
+    app_id: i64,
+    estimate: &market_estimates::AppEstimates,
+) -> Result<()> {
+    let downloads = estimate.humanized_worldwide_last_month_downloads.as_ref();
+    let revenue = estimate.humanized_worldwide_last_month_revenue.as_ref();
+    let downloads_value = downloads
+        .map(|metric| i64::try_from(metric.downloads))
+        .transpose()?;
+    let downloads_rounded = downloads
+        .map(|metric| i64::try_from(metric.downloads_rounded))
+        .transpose()?;
+    let revenue_value = revenue
+        .map(|metric| i64::try_from(metric.revenue))
+        .transpose()?;
+    let revenue_rounded = revenue
+        .map(|metric| i64::try_from(metric.revenue_rounded))
+        .transpose()?;
+    sqlx::query(indoc! {r#"
+        INSERT INTO app_estimate_snapshots (
+            app_id,
+            fetched_at,
+            downloads_value,
+            downloads_rounded,
+            downloads_prefix,
+            downloads_display,
+            downloads_units,
+            revenue_value,
+            revenue_rounded,
+            revenue_prefix,
+            revenue_display,
+            revenue_units,
+            revenue_currency
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    "#})
+    .bind(app_id)
+    .bind(Utc::now().to_rfc3339())
+    .bind(downloads_value)
+    .bind(downloads_rounded)
+    .bind(downloads.and_then(|metric| metric.prefix.as_deref()))
+    .bind(downloads.map(|metric| metric.string.as_str()))
+    .bind(downloads.map(|metric| metric.units.as_str()))
+    .bind(revenue_value)
+    .bind(revenue_rounded)
+    .bind(revenue.and_then(|metric| metric.prefix.as_deref()))
+    .bind(revenue.map(|metric| metric.string.as_str()))
+    .bind(revenue.map(|metric| metric.units.as_str()))
+    .bind(revenue.map(|_| "USD"))
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+async fn latest_app_estimates(pool: &SqlitePool, app_id: i64) -> Result<Option<AppEstimatesView>> {
+    let row = sqlx::query_as::<_, EstimateSnapshotRow>(indoc! {r#"
+        SELECT
+            fetched_at,
+            downloads_value,
+            downloads_rounded,
+            downloads_prefix,
+            downloads_display,
+            downloads_units,
+            revenue_value,
+            revenue_rounded,
+            revenue_prefix,
+            revenue_display,
+            revenue_units,
+            revenue_currency
+        FROM app_estimate_snapshots
+        WHERE app_id = ?
+        ORDER BY fetched_at DESC
+        LIMIT 1
+    "#})
+    .bind(app_id)
+    .fetch_optional(pool)
+    .await?;
+    row.map(app_estimates_view).transpose()
+}
+
+fn app_estimates_view(row: EstimateSnapshotRow) -> Result<AppEstimatesView> {
+    Ok(AppEstimatesView {
+        fetched_at: row.fetched_at,
+        source: "Market estimate".to_string(),
+        scope: "worldwide".to_string(),
+        period: "last_month".to_string(),
+        downloads: app_estimate_metric(
+            row.downloads_value,
+            row.downloads_rounded,
+            row.downloads_prefix,
+            row.downloads_display,
+            row.downloads_units,
+        )?,
+        revenue: app_estimate_metric(
+            row.revenue_value,
+            row.revenue_rounded,
+            row.revenue_prefix,
+            row.revenue_display,
+            row.revenue_units,
+        )?,
+        revenue_currency: row.revenue_currency,
+    })
+}
+
+fn app_estimate_metric(
+    value: Option<i64>,
+    rounded_value: Option<i64>,
+    prefix: Option<String>,
+    display: Option<String>,
+    units: Option<String>,
+) -> Result<Option<AppEstimateMetric>> {
+    match value {
+        None => Ok(None),
+        Some(value) => Ok(Some(AppEstimateMetric {
+            value,
+            rounded_value: rounded_value.context("estimate is missing its rounded value")?,
+            prefix,
+            display: display.context("estimate is missing its display string")?,
+            units: units.context("estimate is missing its units")?,
+        })),
+    }
+}
+
 async fn latest_payload(
     pool: &SqlitePool,
     query: &str,
@@ -1461,6 +1692,42 @@ async fn popularity_history(pool: &SqlitePool, app_id: i64) -> Result<Vec<Histor
         });
     }
     Ok(history)
+}
+
+async fn estimate_history(pool: &SqlitePool, app_id: i64) -> Result<Vec<HistorySnapshot>> {
+    let rows = sqlx::query_as::<_, EstimateSnapshotRow>(indoc! {r#"
+        SELECT
+            fetched_at,
+            downloads_value,
+            downloads_rounded,
+            downloads_prefix,
+            downloads_display,
+            downloads_units,
+            revenue_value,
+            revenue_rounded,
+            revenue_prefix,
+            revenue_display,
+            revenue_units,
+            revenue_currency
+        FROM app_estimate_snapshots
+        WHERE app_id = ?
+          AND datetime(fetched_at) >= datetime('now', '-30 days')
+        ORDER BY fetched_at DESC
+    "#})
+    .bind(app_id)
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter()
+        .map(|row| {
+            let view = app_estimates_view(row)?;
+            Ok(HistorySnapshot {
+                resource: "estimates".to_string(),
+                country: None,
+                fetched_at: view.fetched_at.clone(),
+                payload: serde_json::to_value(view)?,
+            })
+        })
+        .collect()
 }
 
 async fn review_summary(pool: &SqlitePool, app_id: i64, country: &str) -> Result<ReviewSummary> {
@@ -1613,6 +1880,10 @@ async fn prune_history(pool: &SqlitePool) -> Result<()> {
         "#},
         indoc! {r#"
             DELETE FROM app_resource_snapshots
+            WHERE datetime(fetched_at) < datetime('now', '-30 days')
+        "#},
+        indoc! {r#"
+            DELETE FROM app_estimate_snapshots
             WHERE datetime(fetched_at) < datetime('now', '-30 days')
         "#},
         indoc! {r#"

@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { ArrowUpRight, Expand, Globe2, Star } from "lucide-react";
+import {
+  ArrowDownToLine,
+  ArrowUpRight,
+  Banknote,
+  Expand,
+  Globe2,
+  Star,
+} from "lucide-react";
 import {
   countryFlag,
   countryLabel,
@@ -83,6 +90,45 @@ export default function Overview({ view }: { view: AppView | null }) {
           />
           <Fact label="Languages" value={details.languages?.join(", ")} wide />
         </div>
+      </section>
+
+      <section className="panel estimates-panel">
+        <div className="section-heading">
+          <h2>Worldwide estimates</h2>
+          <span>
+            {view.estimates
+              ? `${view.estimates.source} · Updated ${relativeTime(
+                  view.estimates.fetched_at,
+                )}`
+              : "Market estimates · Awaiting refresh"}
+          </span>
+        </div>
+        {view.estimates ? (
+          <div className="estimate-ledger">
+            <div>
+              <span>
+                <ArrowDownToLine size={14} /> Downloads
+              </span>
+              <strong>
+                {view.estimates.downloads?.display ?? "Not estimated"}
+              </strong>
+              <small>Worldwide · Last month</small>
+            </div>
+            <div>
+              <span>
+                <Banknote size={14} /> Revenue
+              </span>
+              <strong>
+                {view.estimates.revenue?.display ?? "Not estimated"}
+              </strong>
+              <small>Worldwide · Last month · USD</small>
+            </div>
+          </div>
+        ) : (
+          <div className="empty-section compact">
+            Estimates will be fetched with this app’s next refresh.
+          </div>
+        )}
       </section>
 
       <section className="panel popularity-panel">

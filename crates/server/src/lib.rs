@@ -25,7 +25,7 @@ pub struct ServeConfig {
 pub async fn serve(config: ServeConfig) -> Result<()> {
     init_tracing();
     let manager = ProjectManager::open(config.storage_base).await?;
-    let service = AppService::new(manager, config.client)?;
+    let service = AppService::new(manager.clone(), config.client)?;
     let app = router(service.clone());
     let address = (config.host, config.port);
     let listener = TcpListener::bind(address)
@@ -37,7 +37,7 @@ pub async fn serve(config: ServeConfig) -> Result<()> {
     println!("asapi app: http://{local_address}");
     println!("API reference: http://{local_address}/api/openapi.json");
 
-    tokio::spawn(async move {
+    let refresh_task = tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(15 * 60));
         interval.tick().await;
         loop {
@@ -48,10 +48,19 @@ pub async fn serve(config: ServeConfig) -> Result<()> {
         }
     });
 
-    axum::serve(listener, app)
+    let server_result = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
-        .context("server stopped unexpectedly")
+        .context("server stopped unexpectedly");
+
+    refresh_task.abort();
+    let _ = refresh_task.await;
+    manager
+        .checkpoint_and_close()
+        .await
+        .context("failed to checkpoint project databases during shutdown")?;
+
+    server_result
 }
 
 pub fn router(service: AppService) -> Router {
@@ -71,5 +80,31 @@ fn init_tracing() {
 }
 
 async fn shutdown_signal() {
-    let _ = tokio::signal::ctrl_c().await;
+    let ctrl_c = async {
+        if let Err(error) = tokio::signal::ctrl_c().await {
+            tracing::error!(%error, "failed to listen for Ctrl-C");
+        }
+    };
+
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+
+        let terminate = async {
+            match signal(SignalKind::terminate()) {
+                Ok(mut signal) => {
+                    signal.recv().await;
+                }
+                Err(error) => tracing::error!(%error, "failed to listen for SIGTERM"),
+            }
+        };
+
+        tokio::select! {
+            () = ctrl_c => {},
+            () = terminate => {},
+        }
+    }
+
+    #[cfg(not(unix))]
+    ctrl_c.await;
 }

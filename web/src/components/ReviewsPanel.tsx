@@ -8,6 +8,7 @@ import {
   relativeTime,
 } from "../format";
 import type { Review, ReviewSummary, Storefront } from "../types";
+import { useAsyncScope } from "../useAsyncScope";
 import Picker from "./Picker";
 import type { PickerOption } from "./Picker";
 
@@ -50,9 +51,17 @@ export default function ReviewsPanel({
   const [lastUpdated, setLastUpdated] = useState<string | null>(
     summary?.page_one_updated_at ?? null,
   );
-  const [viewportPagination, setViewportPagination] = useState(false);
-  const reviewList = useRef<HTMLDivElement | null>(null);
+  const loadingRef = useRef(false);
   const sentinel = useRef<HTMLDivElement | null>(null);
+  const reviewScope = `${projectId}:${appId}:${country}:${rating ?? "all"}:${
+    summary?.page_one_updated_at ?? ""
+  }:${summary?.count ?? 0}:${storefronts
+    .map((storefront) => storefront.country)
+    .join(",")}`;
+  const {
+    begin: beginReviewRequest,
+    isCurrent: isCurrentReviewRequest,
+  } = useAsyncScope(reviewScope);
 
   const pickerOptions = useMemo<PickerOption[]>(
     () => [
@@ -77,7 +86,9 @@ export default function ReviewsPanel({
   );
 
   const loadNext = useCallback(async () => {
-    if (loading || !hasMore || page >= 10 || error) return;
+    if (loadingRef.current || !hasMore || page >= 10 || error) return;
+    const token = beginReviewRequest();
+    loadingRef.current = true;
     setLoading(true);
     setError("");
     const nextPage = page + 1;
@@ -98,6 +109,12 @@ export default function ReviewsPanel({
           ),
         })),
       );
+      if (!isCurrentReviewRequest(token)) return;
+      if (results.some((result) => result.page.country !== result.country)) {
+        throw new Error(
+          "The server returned reviews for a different storefront. Retry this page.",
+        );
+      }
       setReviews((existing) => {
         const ids = new Set(
           existing.map((review) => `${review.country}:${review.review_id}`),
@@ -151,12 +168,17 @@ export default function ReviewsPanel({
         results.reduce((total, result) => total + result.page.total_all, 0),
       );
     } catch (reason) {
-      setError((reason as Error).message);
+      if (isCurrentReviewRequest(token)) {
+        setError((reason as Error).message);
+      }
     } finally {
-      setLoading(false);
+      if (isCurrentReviewRequest(token)) {
+        loadingRef.current = false;
+        setLoading(false);
+      }
     }
   }, [
-    loading,
+    beginReviewRequest,
     hasMore,
     page,
     projectId,
@@ -165,13 +187,16 @@ export default function ReviewsPanel({
     storefronts,
     rating,
     error,
+    isCurrentReviewRequest,
     onTotalChange,
   ]);
 
   useEffect(() => {
+    loadingRef.current = false;
     setReviews([]);
     setPage(0);
     setHasMore(true);
+    setLoading(false);
     setError("");
     setDisplayTotal(summary?.count ?? 0);
     setRatingCounts(summary?.rating_counts ?? [0, 0, 0, 0, 0]);
@@ -193,29 +218,20 @@ export default function ReviewsPanel({
   }, [page, hasMore, loading, loadNext]);
 
   useEffect(() => {
-    const media = window.matchMedia("(max-width: 760px)");
-    const updatePaginationRoot = () => setViewportPagination(media.matches);
-    updatePaginationRoot();
-    media.addEventListener("change", updatePaginationRoot);
-    return () => media.removeEventListener("change", updatePaginationRoot);
-  }, []);
-
-  useEffect(() => {
     const node = sentinel.current;
-    const root = viewportPagination ? null : reviewList.current;
-    if (!node || (!viewportPagination && !root)) return;
+    if (!node) return;
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0]?.isIntersecting) void loadNext();
       },
       {
-        root,
-        rootMargin: viewportPagination ? "360px 0px" : "180px",
+        root: null,
+        rootMargin: "360px 0px",
       },
     );
     observer.observe(node);
     return () => observer.disconnect();
-  }, [loadNext, viewportPagination]);
+  }, [loadNext]);
 
   return (
     <section className="reviews-panel">
@@ -278,7 +294,7 @@ export default function ReviewsPanel({
           ))}
         </div>
       </div>
-      <div ref={reviewList} className="review-list">
+      <div className="review-list">
         {reviews.map((review) => (
           <article key={`${review.country}:${review.review_id}`}>
             <div className="review-title">

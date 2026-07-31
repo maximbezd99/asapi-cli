@@ -3,6 +3,7 @@ pub mod categories;
 pub mod client;
 pub mod commands;
 pub mod countries;
+pub mod market_estimates;
 pub mod output;
 pub mod requests;
 

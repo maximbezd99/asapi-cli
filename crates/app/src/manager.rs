@@ -23,6 +23,7 @@ use uuid::Uuid;
 use crate::models::Project;
 
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
+const WAL_AUTOCHECKPOINT_PAGES: u32 = 100;
 
 #[derive(Clone)]
 pub struct ProjectHandle {
@@ -77,6 +78,47 @@ impl ProjectManager {
             .get(id)
             .cloned()
             .with_context(|| format!("project '{id}' was not found"))
+    }
+
+    pub async fn checkpoint_and_close(&self) -> Result<()> {
+        let _operation = self.operations.lock().await;
+        let projects = self
+            .projects
+            .read()
+            .await
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut first_error = None;
+
+        for project in projects {
+            let checkpoint =
+                sqlx::query_as::<_, (i64, i64, i64)>("PRAGMA wal_checkpoint(TRUNCATE)")
+                    .fetch_one(&project.pool)
+                    .await;
+            project.pool.close().await;
+
+            match checkpoint {
+                Ok((busy, _, _)) if busy != 0 && first_error.is_none() => {
+                    first_error = Some(anyhow::anyhow!(
+                        "database remained busy while checkpointing {}",
+                        project.path.display()
+                    ));
+                }
+                Err(error) if first_error.is_none() => {
+                    first_error = Some(
+                        anyhow::Error::new(error)
+                            .context(format!("failed to checkpoint {}", project.path.display())),
+                    );
+                }
+                _ => {}
+            }
+        }
+
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 
     pub async fn create(&self, name: &str) -> Result<Project> {
@@ -238,6 +280,7 @@ async fn open_pool(path: &Path) -> Result<SqlitePool> {
         .foreign_keys(true)
         .journal_mode(SqliteJournalMode::Wal)
         .synchronous(SqliteSynchronous::Normal)
+        .pragma("wal_autocheckpoint", WAL_AUTOCHECKPOINT_PAGES.to_string())
         .busy_timeout(Duration::from_secs(5));
     SqlitePoolOptions::new()
         .max_connections(4)
@@ -288,6 +331,13 @@ mod tests {
             database.extension().and_then(|value| value.to_str()),
             Some("sqlite3")
         );
+
+        let project = manager.get(&projects[0].id).await.unwrap();
+        let wal_autocheckpoint = sqlx::query_scalar::<_, i64>("PRAGMA wal_autocheckpoint")
+            .fetch_one(&project.pool)
+            .await
+            .unwrap();
+        assert_eq!(wal_autocheckpoint, i64::from(WAL_AUTOCHECKPOINT_PAGES));
     }
 
     #[tokio::test]
@@ -307,5 +357,27 @@ mod tests {
         manager.delete(&default.id).await.unwrap();
         assert!(manager.delete(&second.id).await.is_err());
         assert_eq!(manager.list().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn graceful_close_checkpoints_and_truncates_wal() {
+        let temporary = tempfile::tempdir().unwrap();
+        let manager = ProjectManager::open(Some(temporary.path().to_path_buf()))
+            .await
+            .unwrap();
+        let project = manager.list().await.remove(0);
+        let handle = manager.get(&project.id).await.unwrap();
+        sqlx::query("UPDATE project SET name = 'Checkpointed' WHERE singleton = 1")
+            .execute(&handle.pool)
+            .await
+            .unwrap();
+        let wal_path = PathBuf::from(format!("{}-wal", handle.path.display()));
+
+        manager.checkpoint_and_close().await.unwrap();
+
+        assert!(
+            !wal_path.exists() || std::fs::metadata(wal_path).unwrap().len() == 0,
+            "WAL should be absent or empty after graceful close"
+        );
     }
 }

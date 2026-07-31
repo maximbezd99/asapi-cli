@@ -52,7 +52,7 @@ pub fn document() -> Value {
                         "required": false,
                         "schema": {
                             "type": "string",
-                            "enum": ["details", "popularity"],
+                            "enum": ["details", "estimates", "popularity"],
                             "default": "details"
                         }
                     }
@@ -310,7 +310,11 @@ fn schemas() -> Value {
                     "maxItems": 10
                 },
                 "country": {"type": ["string", "null"]},
-                "full": {"type": "boolean", "default": false}
+                "full": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Fetch product-page data plus worldwide last-month download and revenue estimates."
+                }
             }),
             &["apps"]
         ),

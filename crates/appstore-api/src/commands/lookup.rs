@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::{bail, Result};
 use chrono::{DateTime, FixedOffset};
 use reqwest::Url;
@@ -10,6 +12,7 @@ use super::{
 use crate::{
     app_store::{product_page_url, resolve_country, ProductPagePayload},
     client::ApiClient,
+    market_estimates::{self, HumanizedDownloads, HumanizedRevenue},
     output::Envelope,
     requests::LookupRequest,
 };
@@ -45,6 +48,10 @@ pub struct LookupApp {
     pub released_at: Option<DateTime<FixedOffset>>,
     pub version_released_at: Option<DateTime<FixedOffset>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub humanized_worldwide_last_month_downloads: Option<HumanizedDownloads>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub humanized_worldwide_last_month_revenue: Option<HumanizedRevenue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub has_in_app_purchases: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub has_external_purchases: Option<bool>,
@@ -55,6 +62,19 @@ pub struct LookupApp {
 }
 
 pub async fn run(client: &ApiClient, args: &LookupRequest) -> Result<Envelope> {
+    run_with_estimates(client, args, true).await
+}
+
+#[doc(hidden)]
+pub async fn run_without_estimates(client: &ApiClient, args: &LookupRequest) -> Result<Envelope> {
+    run_with_estimates(client, args, false).await
+}
+
+async fn run_with_estimates(
+    client: &ApiClient,
+    args: &LookupRequest,
+    include_estimates: bool,
+) -> Result<Envelope> {
     if args.apps.len() > 10 {
         bail!("lookup accepts at most 10 apps per request");
     }
@@ -63,14 +83,25 @@ pub async fn run(client: &ApiClient, args: &LookupRequest) -> Result<Envelope> {
     let json = client.fetch_json(lookup_url(&ids, &country)?).await?;
     let mut batch = parse(&json);
     if args.full {
-        for app in &mut batch.records {
-            enrich_from_product_page(client, app, &country).await?;
+        if include_estimates {
+            let (product_pages, estimates) = tokio::join!(
+                enrich_all_from_product_pages(client, &mut batch.records, &country),
+                market_estimates::fetch_app_estimates(client, &ids),
+            );
+            product_pages?;
+            merge_estimates(&mut batch.records, estimates?);
+        } else {
+            enrich_all_from_product_pages(client, &mut batch.records, &country).await?;
         }
     }
     let mut result = envelope(
         "lookup",
         if args.full {
-            "Apple App Store and product page"
+            if include_estimates {
+                "Apple App Store, product page, and market estimates"
+            } else {
+                "Apple App Store and product page"
+            }
         } else {
             "Apple App Store"
         },
@@ -82,12 +113,41 @@ pub async fn run(client: &ApiClient, args: &LookupRequest) -> Result<Envelope> {
         None,
     )?;
     if args.full {
-        result.meta.coverage_note = Some(
+        result.meta.coverage_note = Some(if include_estimates {
+            "Screenshots, in-app purchases, and similar apps reflect the public storefront product page. Worldwide last-month downloads and revenue are third-party rounded estimates; preserve the displayed string because '<' buckets are upper-bound ranges, not exact values."
+                .to_string()
+        } else {
             "Screenshots, in-app purchases, and similar apps reflect the public storefront product page and may change or be incomplete."
-                .to_string(),
-        );
+                .to_string()
+        });
     }
     Ok(result)
+}
+
+async fn enrich_all_from_product_pages(
+    client: &ApiClient,
+    apps: &mut [LookupApp],
+    country: &str,
+) -> Result<()> {
+    for app in apps {
+        enrich_from_product_page(client, app, country).await?;
+    }
+    Ok(())
+}
+
+fn merge_estimates(apps: &mut [LookupApp], estimates: Vec<market_estimates::AppEstimates>) {
+    let mut estimates = estimates
+        .into_iter()
+        .map(|estimate| (estimate.app_id, estimate))
+        .collect::<HashMap<_, _>>();
+    for app in apps {
+        if let Some(estimate) = estimates.remove(&app.app_id) {
+            app.humanized_worldwide_last_month_downloads =
+                estimate.humanized_worldwide_last_month_downloads;
+            app.humanized_worldwide_last_month_revenue =
+                estimate.humanized_worldwide_last_month_revenue;
+        }
+    }
 }
 
 async fn enrich_from_product_page(
@@ -164,6 +224,8 @@ pub(super) fn parse(json: &Value) -> ParseBatch<LookupApp> {
                 .and_then(|number| number.parse().ok()),
             released_at: date(value, "releaseDate"),
             version_released_at: date(value, "currentVersionReleaseDate"),
+            humanized_worldwide_last_month_downloads: None,
+            humanized_worldwide_last_month_revenue: None,
             has_in_app_purchases: None,
             has_external_purchases: None,
             in_app_purchases: None,

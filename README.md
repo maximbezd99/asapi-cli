@@ -3,7 +3,8 @@
 `asapi` is a public Apple App Store research CLI and local research workspace. It
 does not require Apple credentials.
 
-The existing commands query Apple directly:
+The existing commands query Apple directly. `lookup --full` also adds Sensor
+Tower's public rounded worldwide estimates for the last month:
 
 ```bash
 asapi search "habit tracker" --country us
@@ -51,7 +52,7 @@ http://127.0.0.1:3000/api/openapi.json
 
 Agents can read 30-day snapshots from
 `GET /api/v1/projects/<project-id>/apps/<app-id>/history` using the optional
-`country` and `resource=details|popularity` query parameters.
+`country` and `resource=details|estimates|popularity` query parameters.
 
 Example agent workflow:
 
@@ -80,7 +81,7 @@ curl -X POST \
 
 The main storefront and opt-in automatic storefronts refresh after 24 hours.
 Opening an on-demand storefront or review page refreshes stale data. App,
-popularity, and keyword observations are retained for 30 days.
+estimate, popularity, and keyword observations are retained for 30 days.
 
 ## Workspace
 

@@ -622,7 +622,9 @@ a {
   min-width: 0;
   height: 100%;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   background: var(--paper);
 }
 
@@ -698,10 +700,9 @@ a {
 
 .app-page {
   display: flex;
-  height: 100%;
-  min-height: 0;
+  min-height: 100%;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .app-header {
@@ -1095,17 +1096,15 @@ a {
 .app-body {
   display: block;
   min-height: 0;
-  flex: 1;
-  overflow: hidden;
+  flex: 0 0 auto;
+  overflow: visible;
 }
 
 .app-content {
-  height: 100%;
+  height: auto;
   min-width: 0;
   min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
+  overflow: visible;
 }
 
 .overview {
@@ -1204,12 +1203,64 @@ a {
   text-overflow: ellipsis;
 }
 
+.estimate-ledger {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.estimate-ledger > div {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px 16px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.estimate-ledger > div:first-child {
+  border-right: 1px solid var(--rule);
+}
+
+.estimate-ledger span {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.estimate-ledger span svg {
+  flex: 0 0 auto;
+  color: var(--ochre);
+}
+
+.estimate-ledger strong {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.estimate-ledger small {
+  grid-column: 1 / -1;
+  color: var(--ink-faint);
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
 .screenshots {
   display: flex;
   align-items: stretch;
   gap: 9px;
   padding: 12px;
   overflow-x: auto;
+  scroll-padding-inline: 12px;
   scroll-snap-type: x mandatory;
 }
 
@@ -1423,6 +1474,26 @@ a {
   border-bottom: 1px solid var(--rule);
 }
 
+.popularity-grid:has(> article:last-child:nth-child(3n + 1))::after,
+.popularity-grid:has(> article:last-child:nth-child(3n + 2))::after {
+  min-height: 43px;
+  border: 1px solid var(--rule);
+  background: var(--paper-bright);
+  content: "";
+}
+
+.popularity-grid:has(> article:last-child:nth-child(3n + 1))::after {
+  grid-column: span 2;
+  background:
+    linear-gradient(
+      to right,
+      transparent calc(50% - 0.5px),
+      var(--rule) calc(50% - 0.5px) calc(50% + 0.5px),
+      transparent calc(50% + 0.5px)
+    ),
+    var(--paper-bright);
+}
+
 .popularity-grid article.unavailable {
   background:
     repeating-linear-gradient(
@@ -1569,12 +1640,12 @@ a {
 }
 
 .reviews-mode .app-content {
-  overflow: hidden;
+  overflow: visible;
 }
 
 .reviews-panel {
   display: grid;
-  height: 100%;
+  height: auto;
   min-width: 0;
   min-height: 0;
   grid-template-rows: 49px auto minmax(0, 1fr);
@@ -1688,9 +1759,7 @@ a {
   min-height: 0;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-content: start;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
+  overflow: visible;
 }
 
 .review-list article {
@@ -1824,7 +1893,7 @@ a {
 .keywords-panel {
   display: grid;
   width: 100%;
-  height: 100%;
+  height: auto;
   min-height: 0;
   grid-template-rows: auto auto minmax(0, 1fr);
   background: var(--paper-bright);
@@ -1893,7 +1962,7 @@ a {
 
 .keyword-table-wrap {
   width: 100%;
-  height: 100%;
+  height: auto;
   min-height: 0;
   overflow: auto;
   background: var(--paper-bright);
@@ -2902,6 +2971,19 @@ a {
   .popularity-grid article:nth-last-child(-n + 2) {
     border-bottom: 1px solid var(--rule);
   }
+
+  .popularity-grid::after {
+    display: none;
+    grid-column: auto;
+    background: var(--paper-bright);
+  }
+
+  .popularity-grid:has(> article:last-child:nth-child(odd))::after {
+    display: block;
+    min-height: 43px;
+    border: 1px solid var(--rule);
+    content: "";
+  }
 }
 
 @media (max-width: 760px) {
@@ -3064,6 +3146,14 @@ a {
     grid-template-columns: 1fr;
   }
 
+  .estimate-ledger {
+    grid-template-columns: 1fr;
+  }
+
+  .estimate-ledger > div:first-child {
+    border-right: 0;
+  }
+
   .facts > div.wide {
     grid-column: auto;
   }
@@ -3197,6 +3287,10 @@ a {
 
   .popularity-grid article:last-child {
     border-bottom: 1px solid var(--rule);
+  }
+
+  .popularity-grid::after {
+    display: none;
   }
 
   .storefront-records > div {

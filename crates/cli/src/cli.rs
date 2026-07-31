@@ -101,7 +101,7 @@ pub struct LookupArgs {
     pub apps: Vec<AppSpecifier>,
     #[command(flatten)]
     pub country: CountryArgs,
-    /// Also scrape screenshots, in-app purchases, and similar apps.
+    /// Also fetch product-page data and worldwide last-month market estimates.
     #[arg(long)]
     pub full: bool,
 }

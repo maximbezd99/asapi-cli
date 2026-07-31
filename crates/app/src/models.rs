@@ -38,10 +38,31 @@ pub struct AppView {
     pub storefronts: Vec<Storefront>,
     pub details: Option<Value>,
     pub details_updated_at: Option<String>,
+    pub estimates: Option<AppEstimatesView>,
     pub iap: Option<Value>,
     pub similar: Option<Value>,
     pub popularity: Option<PopularityView>,
     pub review_summary: ReviewSummary,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AppEstimatesView {
+    pub fetched_at: String,
+    pub source: String,
+    pub scope: String,
+    pub period: String,
+    pub downloads: Option<AppEstimateMetric>,
+    pub revenue: Option<AppEstimateMetric>,
+    pub revenue_currency: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AppEstimateMetric {
+    pub value: i64,
+    pub rounded_value: i64,
+    pub prefix: Option<String>,
+    pub display: String,
+    pub units: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

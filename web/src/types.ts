@@ -61,10 +61,46 @@ export interface AppDetails {
   size_bytes?: number;
   released_at?: string;
   version_released_at?: string;
+  humanized_worldwide_last_month_downloads?: HumanizedDownloads;
+  humanized_worldwide_last_month_revenue?: HumanizedRevenue;
   has_in_app_purchases?: boolean;
   has_external_purchases?: boolean;
   in_app_purchases?: Purchase[];
   similar_apps?: SimilarApp[];
+}
+
+export interface HumanizedDownloads {
+  downloads: number;
+  downloads_rounded: number;
+  prefix?: string;
+  string: string;
+  units: string;
+}
+
+export interface HumanizedRevenue {
+  prefix?: string;
+  revenue: number;
+  revenue_rounded: number;
+  string: string;
+  units: string;
+}
+
+export interface AppEstimateMetric {
+  value: number;
+  rounded_value: number;
+  prefix: string | null;
+  display: string;
+  units: string;
+}
+
+export interface AppEstimates {
+  fetched_at: string;
+  source: string;
+  scope: "worldwide";
+  period: "last_month";
+  downloads: AppEstimateMetric | null;
+  revenue: AppEstimateMetric | null;
+  revenue_currency: string | null;
 }
 
 export interface Purchase {
@@ -108,6 +144,7 @@ export interface AppView {
   storefronts: Storefront[];
   details: Envelope<AppDetails[]> | null;
   details_updated_at: string | null;
+  estimates: AppEstimates | null;
   iap: Envelope<{
     has_in_app_purchases: boolean;
     has_external_purchases: boolean;

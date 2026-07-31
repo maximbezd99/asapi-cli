@@ -149,23 +149,23 @@ fn http_recommendation(status: StatusCode, retry_after: Option<Duration>) -> Str
             "Check the command arguments and supported country or category values.".to_string()
         }
         StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
-            "Apple denied the request; verify that this public resource is available for the selected country."
+            "The upstream service denied the request; verify that this public resource is available for the selected country."
                 .to_string()
         }
         StatusCode::NOT_FOUND => {
             "Verify the app ID and country, then try again.".to_string()
         }
         StatusCode::TOO_MANY_REQUESTS => retry_after.map_or_else(
-            || "Apple is rate limiting requests; wait before trying again.".to_string(),
+            || "The upstream service is rate limiting requests; wait before trying again.".to_string(),
             |delay| {
                 format!(
-                    "Apple is rate limiting requests; wait at least {} before trying again.",
+                    "The upstream service is rate limiting requests; wait at least {} before trying again.",
                     display_delay(delay)
                 )
             },
         ),
         status if status.is_server_error() => {
-            "Apple's service is temporarily unavailable; try again later.".to_string()
+            "The upstream service is temporarily unavailable; try again later.".to_string()
         }
         _ => "The request was rejected; check the input before trying again.".to_string(),
     }

@@ -26,6 +26,8 @@ import type {
   Keyword,
   Project,
 } from "../types";
+import { useAsyncScope } from "../useAsyncScope";
+import type { AsyncScopeToken } from "../useAsyncScope";
 import KeywordsTable from "./KeywordsTable";
 import Overview from "./Overview";
 import Picker from "./Picker";
@@ -73,19 +75,67 @@ export default function AppPage({
   >("idle");
   const automaticRefreshes = useRef(new Set<string>());
   const copyReset = useRef<number | null>(null);
-  const details = view?.details?.data[0];
+  const countryRef = useRef(country);
+  countryRef.current = country;
+  const activeView =
+    view?.apple_id === app.apple_id && view.selected_country === country
+      ? view
+      : null;
+  const details = activeView?.details?.data[0];
+  const appScope = `${project.id}:${app.apple_id}`;
+  const {
+    begin: beginViewRequest,
+    isCurrent: isCurrentViewRequest,
+  } = useAsyncScope(`${appScope}:${country}`);
+  const {
+    begin: beginKeywordRequest,
+    isCurrent: isCurrentKeywordRequest,
+  } = useAsyncScope(appScope);
+  const {
+    begin: beginRefreshRequest,
+    isCurrent: isCurrentRefreshRequest,
+  } = useAsyncScope(appScope);
+
+  const commitView = useCallback(
+    (nextView: AppView, expectedCountry: string, token: AsyncScopeToken) => {
+      if (!isCurrentViewRequest(token)) return false;
+      if (
+        nextView.apple_id !== app.apple_id ||
+        nextView.selected_country !== expectedCountry
+      ) {
+        setError(
+          "The server returned data for a different app or storefront. Retry this app.",
+        );
+        return false;
+      }
+      setView(nextView);
+      return true;
+    },
+    [app.apple_id, isCurrentViewRequest],
+  );
 
   const load = useCallback(async () => {
+    const token = beginViewRequest();
     setLoading(true);
     setError("");
     try {
-      setView(await api.app(project.id, app.apple_id, country));
+      const nextView = await api.app(project.id, app.apple_id, country);
+      commitView(nextView, country, token);
     } catch (reason) {
-      setError((reason as Error).message);
+      if (isCurrentViewRequest(token)) {
+        setError((reason as Error).message);
+      }
     } finally {
-      setLoading(false);
+      if (isCurrentViewRequest(token)) setLoading(false);
     }
-  }, [project.id, app.apple_id, country]);
+  }, [
+    app.apple_id,
+    beginViewRequest,
+    commitView,
+    country,
+    isCurrentViewRequest,
+    project.id,
+  ]);
 
   useEffect(() => {
     void load();
@@ -99,8 +149,8 @@ export default function AppPage({
   );
 
   useEffect(() => {
-    setReviewCount(view?.review_summary.count ?? 0);
-  }, [view?.review_summary.count]);
+    setReviewCount(activeView?.review_summary.count ?? 0);
+  }, [activeView?.review_summary.count]);
 
   useEffect(() => {
     setFallbackDeveloperWebsiteUrl(null);
@@ -131,16 +181,51 @@ export default function AppPage({
 
   const refreshAndReload = useCallback(
     async (all = false) => {
-      await api.refreshApp(project.id, app.apple_id, all ? { all: true } : {});
-      const nextView = await api.app(project.id, app.apple_id, country);
-      setView(nextView);
-      await onAppChanged();
+      const refreshToken = beginRefreshRequest();
+      try {
+        await api.refreshApp(
+          project.id,
+          app.apple_id,
+          all ? { all: true } : {},
+        );
+        if (!isCurrentRefreshRequest(refreshToken)) return false;
+        const selectedCountry = countryRef.current;
+        const viewToken = beginViewRequest();
+        const nextView = await api.app(
+          project.id,
+          app.apple_id,
+          selectedCountry,
+        );
+        const committed = commitView(
+          nextView,
+          selectedCountry,
+          viewToken,
+        );
+        await onAppChanged();
+        return committed;
+      } catch (reason) {
+        if (isCurrentRefreshRequest(refreshToken)) throw reason;
+        return false;
+      }
     },
-    [app.apple_id, country, onAppChanged, project.id],
+    [
+      app.apple_id,
+      beginRefreshRequest,
+      beginViewRequest,
+      commitView,
+      isCurrentRefreshRequest,
+      onAppChanged,
+      project.id,
+    ],
   );
 
   useEffect(() => {
-    if (!view || !isStale(view.details_updated_at)) return;
+    if (
+      !activeView ||
+      (!isStale(activeView.details_updated_at) && activeView.estimates)
+    ) {
+      return;
+    }
     const key = `${project.id}:${app.apple_id}`;
     if (automaticRefreshes.current.has(key)) return;
     automaticRefreshes.current.add(key);
@@ -148,23 +233,36 @@ export default function AppPage({
     refreshAndReload()
       .catch((reason: Error) => setError(reason.message))
       .finally(() => setRefreshing(false));
-  }, [app.apple_id, project.id, refreshAndReload, view]);
+  }, [activeView, app.apple_id, project.id, refreshAndReload]);
 
   useEffect(() => {
     if (tab !== "keywords") return;
+    const token = beginKeywordRequest();
     api
       .keywords(project.id, app.apple_id)
-      .then(setKeywords)
-      .catch((reason: Error) => setError(reason.message));
-  }, [tab, project.id, app.apple_id]);
+      .then((nextKeywords) => {
+        if (isCurrentKeywordRequest(token)) setKeywords(nextKeywords);
+      })
+      .catch((reason: Error) => {
+        if (isCurrentKeywordRequest(token)) setError(reason.message);
+      });
+  }, [
+    app.apple_id,
+    beginKeywordRequest,
+    isCurrentKeywordRequest,
+    project.id,
+    tab,
+  ]);
 
   const refresh = async () => {
     setRefreshing(true);
     setError("");
     try {
-      await refreshAndReload(true);
-      if (tab === "keywords") {
-        setKeywords(await api.keywords(project.id, app.apple_id));
+      const committed = await refreshAndReload(true);
+      if (committed && tab === "keywords") {
+        const token = beginKeywordRequest();
+        const nextKeywords = await api.keywords(project.id, app.apple_id);
+        if (isCurrentKeywordRequest(token)) setKeywords(nextKeywords);
       }
     } catch (reason) {
       setError((reason as Error).message);
@@ -212,9 +310,10 @@ export default function AppPage({
 
   const reloadStorefronts = async (preferredCountry?: string) => {
     const selected = preferredCountry ?? country;
+    const token = beginViewRequest();
     const nextView = await api.app(project.id, app.apple_id, selected);
-    setView(nextView);
-    setCountry(nextView.selected_country);
+    if (!commitView(nextView, selected, token)) return;
+    setCountry(selected);
     await onAppChanged();
   };
 
@@ -268,7 +367,7 @@ export default function AppPage({
         app.apple_id,
         storefrontCountryCode,
       );
-      const fallbackCountry = view?.storefronts.find(
+      const fallbackCountry = activeView?.storefronts.find(
         (storefront) => storefront.is_main,
       )?.country;
       await reloadStorefronts(
@@ -285,14 +384,16 @@ export default function AppPage({
     details?.developer_website_url ?? fallbackDeveloperWebsiteUrl;
   const availableCountries = countries.filter(
     (item) =>
-      !view?.storefronts.some((storefront) => storefront.country === item.code),
+      !activeView?.storefronts.some(
+        (storefront) => storefront.country === item.code,
+      ),
   );
   const availableCountryCodes = availableCountries
     .map((item) => item.code)
     .join(",");
   const headerStorefrontOptions = useMemo(
     () =>
-      (view?.storefronts ?? []).map((storefront) => ({
+      (activeView?.storefronts ?? []).map((storefront) => ({
         value: storefront.country,
         label: countryLabel(storefront.country),
         triggerLabel: `${storefront.country.toUpperCase()}${
@@ -303,7 +404,7 @@ export default function AppPage({
         }`,
         icon: countryFlag(storefront.country),
       })),
-    [view?.storefronts],
+    [activeView?.storefronts],
   );
   const availableStorefrontOptions = useMemo(
     () =>
@@ -325,7 +426,7 @@ export default function AppPage({
   }, [availableCountryCodes, storefrontCountry]);
 
   useEffect(() => {
-    const configured = view?.storefronts ?? [];
+    const configured = activeView?.storefronts ?? [];
     if (!configured.length) return;
     if (
       reviewCountry !== "all" &&
@@ -336,7 +437,7 @@ export default function AppPage({
           configured[0].country,
       );
     }
-  }, [reviewCountry, view?.storefronts]);
+  }, [activeView?.storefronts, reviewCountry]);
 
   const handleTabKeyDown = (
     event: KeyboardEvent<HTMLButtonElement>,
@@ -408,7 +509,7 @@ export default function AppPage({
             onChange={setCountry}
             ariaLabel="Overview storefront"
             className="header-country-picker"
-            disabled={!view}
+            disabled={!activeView}
             searchPlaceholder="Search storefronts"
           />
           <button
@@ -487,7 +588,7 @@ export default function AppPage({
         </div>
       </header>
 
-      {storefrontManager && view ? (
+      {storefrontManager && activeView ? (
         <section className="storefront-manager" aria-label="Storefront settings">
           <form onSubmit={addStorefront}>
             <strong>Add storefront</strong>
@@ -523,7 +624,7 @@ export default function AppPage({
             </button>
           </form>
           <div className="storefront-records">
-            {view.storefronts.map((storefront) => (
+            {activeView.storefronts.map((storefront) => (
               <div key={storefront.country}>
                 <strong>
                   {countryFlag(storefront.country)}{" "}
@@ -584,7 +685,7 @@ export default function AppPage({
         </span>
         <span>
           Updated{" "}
-          <strong>{relativeTime(view?.details_updated_at ?? null)}</strong>
+          <strong>{relativeTime(activeView?.details_updated_at ?? null)}</strong>
         </span>
         <span className={refreshing ? "sync-state active" : "sync-state"}>
           {refreshing ? "Refreshing" : "Current"}
@@ -644,7 +745,7 @@ export default function AppPage({
           aria-labelledby={`app-tab-${tab}`}
           tabIndex={0}
         >
-          {loading && !view ? (
+          {!activeView && (loading || !error) ? (
             <div className="content-loading">
               <span className="registry-loader" aria-hidden="true">
                 <i />
@@ -653,13 +754,13 @@ export default function AppPage({
               </span>
             </div>
           ) : tab === "overview" ? (
-            <Overview view={view} />
+            <Overview view={activeView} />
           ) : tab === "keywords" ? (
             <KeywordsTable
               projectId={project.id}
               appId={app.apple_id}
               keywords={keywords}
-              storefronts={view?.storefronts ?? []}
+              storefronts={activeView?.storefronts ?? []}
               countryFilter={keywordCountryFilter}
               onCountryFilterChange={setKeywordCountryFilter}
               onChange={setKeywords}
@@ -669,10 +770,10 @@ export default function AppPage({
               projectId={project.id}
               appId={app.apple_id}
               country={reviewCountry}
-              storefronts={view?.storefronts ?? []}
+              storefronts={activeView?.storefronts ?? []}
               summary={
-                reviewCountry === view?.selected_country
-                  ? view?.review_summary
+                reviewCountry === activeView?.selected_country
+                  ? activeView?.review_summary
                   : undefined
               }
               onCountryChange={setReviewCountry}

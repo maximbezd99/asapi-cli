@@ -26,6 +26,7 @@ export class ApiError extends Error {
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...options,
+    cache: options?.cache ?? "no-store",
     headers: {
       "Content-Type": "application/json",
       ...options?.headers,
