@@ -1,7 +1,8 @@
 use appstore_api::{
     commands,
     requests::{
-        ChartRequest, ListResource, LookupRequest, PopularityRequest, ReviewsRequest, SearchRequest,
+        ChartRequest, EstimatesRequest, ListResource, LookupRequest, PopularityRequest,
+        ReviewsRequest, SearchRequest,
     },
 };
 use asapi_app::{
@@ -70,6 +71,7 @@ pub fn router(service: AppService) -> Router {
         )
         .route("/query/search", post(raw_search))
         .route("/query/lookup", post(raw_lookup))
+        .route("/query/estimates", post(raw_estimates))
         .route("/query/popularity", post(raw_popularity))
         .route("/query/reviews", post(raw_reviews))
         .route("/query/chart", post(raw_chart))
@@ -349,6 +351,15 @@ async fn raw_lookup(
 ) -> ApiResult<Json<Value>> {
     Ok(Json(serde_json::to_value(
         commands::lookup::run(service.client(), &input).await?,
+    )?))
+}
+
+async fn raw_estimates(
+    State(service): State<AppService>,
+    Json(input): Json<EstimatesRequest>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(serde_json::to_value(
+        commands::estimates::run(service.client(), &input).await?,
     )?))
 }
 

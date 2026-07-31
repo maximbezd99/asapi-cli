@@ -19,6 +19,11 @@ pub struct LookupRequest {
     pub full: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EstimatesRequest {
+    pub app_ids: Vec<u64>,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PopularityGroup {

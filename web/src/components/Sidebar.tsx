@@ -1,4 +1,4 @@
-import { Blocks, Plus, Star, X } from "lucide-react";
+import { Blocks, Plus, Search, Star, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { countryFlag, formatCount } from "../format";
 import type { AppSummary, Country, Project } from "../types";
@@ -14,6 +14,7 @@ interface Props {
   onAppChange: (id: number) => void;
   onCreateProject: (name: string) => Promise<void>;
   onAddApp: (source: string, country: string) => Promise<void>;
+  onOpenSearch: () => void;
 }
 
 export default function Sidebar({
@@ -26,6 +27,7 @@ export default function Sidebar({
   onAppChange,
   onCreateProject,
   onAddApp,
+  onOpenSearch,
 }: Props) {
   const [projectForm, setProjectForm] = useState(false);
   const [projectName, setProjectName] = useState("");
@@ -88,6 +90,15 @@ export default function Sidebar({
           <strong>asapi</strong>
           <span>local research registry</span>
         </div>
+        <button
+          type="button"
+          className="app-search-trigger"
+          onClick={onOpenSearch}
+          title="Search App Store"
+          aria-label="Search App Store"
+        >
+          <Search size={15} />
+        </button>
       </div>
 
       <div className="project-select">

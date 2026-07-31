@@ -69,6 +69,22 @@ export interface AppDetails {
   similar_apps?: SimilarApp[];
 }
 
+export interface SearchApp {
+  position: number;
+  app_id: number;
+  name: string;
+  developer_name?: string;
+  primary_category?: string;
+  display_price?: string;
+  rating?: number;
+  rating_count?: number;
+  version?: string;
+  app_store_url?: string;
+  icon_url?: string;
+  released_at?: string;
+  version_released_at?: string;
+}
+
 export interface HumanizedDownloads {
   downloads: number;
   downloads_rounded: number;
@@ -83,6 +99,12 @@ export interface HumanizedRevenue {
   revenue_rounded: number;
   string: string;
   units: string;
+}
+
+export interface MarketEstimate {
+  app_id: number;
+  humanized_worldwide_last_month_downloads?: HumanizedDownloads;
+  humanized_worldwide_last_month_revenue?: HumanizedRevenue;
 }
 
 export interface AppEstimateMetric {

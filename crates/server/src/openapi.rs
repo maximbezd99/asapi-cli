@@ -116,6 +116,9 @@ pub fn document() -> Value {
             "/query/lookup": {
                 "post": operation("Equivalent to asapi lookup", Some("LookupRequest"), "200")
             },
+            "/query/estimates": {
+                "post": operation("Fetch worldwide last-month estimates in a batch", Some("EstimatesRequest"), "200")
+            },
             "/query/popularity": {
                 "post": operation("Equivalent to asapi popularity", Some("PopularityRequest"), "200")
             },
@@ -317,6 +320,17 @@ fn schemas() -> Value {
                 }
             }),
             &["apps"]
+        ),
+        "EstimatesRequest": object(
+            json!({
+                "app_ids": {
+                    "type": "array",
+                    "items": {"type": "integer", "minimum": 1},
+                    "minItems": 1,
+                    "maxItems": 200
+                }
+            }),
+            &["app_ids"]
         ),
         "PopularityRequest": object(
             json!({

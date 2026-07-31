@@ -3,6 +3,8 @@ import { ArrowUpRight, RefreshCw, Search, Star, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { formatCount, formatDate } from "../format";
 import type { RankedApp } from "../types";
+import { useAppEstimates } from "../useAppEstimates";
+import AppIdCopyButton from "./AppIdCopyButton";
 
 interface Props {
   apps: RankedApp[];
@@ -26,6 +28,13 @@ export default function RankingResultsDialog({
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const attemptedRefresh = useRef(false);
+  const appIds = useMemo(() => apps.map((app) => app.apple_id), [apps]);
+  const {
+    estimates,
+    loading: estimatesLoading,
+    error: estimatesError,
+    retry: retryEstimates,
+  } = useAppEstimates(appIds);
   const hasLegacyRows =
     apps.length > 0 &&
     apps.every(
@@ -70,7 +79,7 @@ export default function RankingResultsDialog({
     const previousFocus = document.activeElement as HTMLElement | null;
     searchRef.current?.focus();
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !event.defaultPrevented) {
         event.preventDefault();
         onClose();
       }
@@ -135,6 +144,20 @@ export default function RankingResultsDialog({
                 )}
               </span>
             )}
+            {estimatesError ? (
+              <span className="ranking-refresh-error" role="alert">
+                Estimates unavailable
+                <button type="button" onClick={retryEstimates}>
+                  Retry
+                </button>
+              </span>
+            ) : (
+              <span role={estimatesLoading ? "status" : undefined}>
+                {estimatesLoading
+                  ? "Fetching worldwide estimates"
+                  : "Worldwide / last month"}
+              </span>
+            )}
           </div>
           <label>
             <Search size={14} />
@@ -158,13 +181,15 @@ export default function RankingResultsDialog({
           <table className="ranking-results-table">
             <thead>
               <tr>
-                <th>#</th>
-                <th>App</th>
-                <th>First release</th>
-                <th>Last release</th>
-                <th>Rating</th>
-                <th>Ratings</th>
-                <th aria-label="App Store link" />
+                <th className="result-position">#</th>
+                <th className="result-app">App</th>
+                <th className="result-date">First release</th>
+                <th className="result-date">Last release</th>
+                <th className="result-rating">Rating</th>
+                <th className="result-ratings">Ratings</th>
+                <th className="result-estimate">Downloads</th>
+                <th className="result-estimate">Revenue</th>
+                <th className="result-link" aria-label="App Store link" />
               </tr>
             </thead>
             <tbody>
@@ -180,7 +205,12 @@ export default function RankingResultsDialog({
                       )}
                       <span>
                         <strong>{app.name}</strong>
-                        <small>{app.developer_name ?? "Unknown developer"}</small>
+                        <span className="ranking-result-app-meta">
+                          <small>
+                            {app.developer_name ?? "Unknown developer"}
+                          </small>
+                          <AppIdCopyButton appId={app.apple_id} />
+                        </span>
                       </span>
                     </span>
                   </td>
@@ -205,6 +235,16 @@ export default function RankingResultsDialog({
                     </span>
                   </td>
                   <td>{formatCount(app.rating_count)}</td>
+                  <td title="Estimated worldwide downloads last month">
+                    {estimates.get(app.apple_id)
+                      ?.humanized_worldwide_last_month_downloads?.string ??
+                      (estimatesLoading ? "Loading…" : "—")}
+                  </td>
+                  <td title="Estimated worldwide revenue last month">
+                    {estimates.get(app.apple_id)
+                      ?.humanized_worldwide_last_month_revenue?.string ??
+                      (estimatesLoading ? "Loading…" : "—")}
+                  </td>
                   <td>
                     <a
                       href={`https://apps.apple.com/${country}/app/id${app.apple_id}`}

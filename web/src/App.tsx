@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Database } from "lucide-react";
 import { api } from "./api";
 import AppPage from "./components/AppPage";
+import AppSearchDialog from "./components/AppSearchDialog";
 import Sidebar from "./components/Sidebar";
 import type { AppSummary, Country, Project } from "./types";
 
@@ -49,6 +50,7 @@ export default function App() {
   const [appId, setAppId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [showAppSearch, setShowAppSearch] = useState(false);
   const activeProjectId = useRef("");
   const appRequestVersions = useRef(new Map<string, number>());
 
@@ -193,6 +195,7 @@ export default function App() {
         onAppChange={changeApp}
         onCreateProject={createProject}
         onAddApp={addApp}
+        onOpenSearch={() => setShowAppSearch(true)}
       />
       <main className="workspace">
         {error ? <div className="global-error">{error}</div> : null}
@@ -222,6 +225,12 @@ export default function App() {
           </div>
         )}
       </main>
+      {showAppSearch ? (
+        <AppSearchDialog
+          countries={countries}
+          onClose={() => setShowAppSearch(false)}
+        />
+      ) : null}
     </div>
   );
 }

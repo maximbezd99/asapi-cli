@@ -30,6 +30,7 @@ interface Props {
   iconOnly?: boolean;
   showChevron?: boolean;
   searchPlaceholder?: string;
+  portalContainer?: HTMLElement | null;
 }
 
 interface MenuPosition {
@@ -52,6 +53,7 @@ export default function Picker({
   iconOnly = false,
   showChevron = !iconOnly,
   searchPlaceholder = "Search",
+  portalContainer,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -373,7 +375,7 @@ export default function Picker({
                 ) : null}
               </div>
             </div>,
-            document.body,
+            portalContainer ?? document.body,
           )
         : null}
     </span>

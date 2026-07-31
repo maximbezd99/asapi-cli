@@ -6,6 +6,7 @@ use serde_json::Value;
 use crate::output::{Envelope, Meta};
 
 pub mod chart;
+pub mod estimates;
 pub mod iap;
 pub mod list;
 pub mod lookup;

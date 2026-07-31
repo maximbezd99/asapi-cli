@@ -5,8 +5,10 @@ import type {
   Country,
   Envelope,
   Keyword,
+  MarketEstimate,
   Project,
   ReviewsPage,
+  SearchApp,
   Storefront,
 } from "./types";
 
@@ -120,6 +122,22 @@ export const api = {
         }),
       })
     ).data[0] ?? null,
+
+  searchApps: async (term: string, country: string, limit = 50) =>
+    (
+      await request<Envelope<SearchApp[]>>("/api/v1/query/search", {
+        method: "POST",
+        body: JSON.stringify({ term, country, limit }),
+      })
+    ).data,
+
+  appEstimates: async (appIds: number[]) =>
+    (
+      await request<Envelope<MarketEstimate[]>>("/api/v1/query/estimates", {
+        method: "POST",
+        body: JSON.stringify({ app_ids: appIds }),
+      })
+    ).data,
 
   reviews: async (
     projectId: string,
