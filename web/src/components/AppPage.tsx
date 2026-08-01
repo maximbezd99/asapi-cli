@@ -54,6 +54,10 @@ export default function AppPage({
   const [country, setCountry] = useState(app.main_country);
   const [view, setView] = useState<AppView | null>(null);
   const [keywords, setKeywords] = useState<Keyword[]>([]);
+  const [keywordLoad, setKeywordLoad] = useState<{
+    scope: string;
+    state: "idle" | "loading" | "loaded" | "error";
+  }>({ scope: "", state: "idle" });
   const [tab, setTab] = useState<AppTab>("overview");
   const [reviewCountry, setReviewCountry] = useState(app.main_country);
   const [keywordCountryFilter, setKeywordCountryFilter] = useState("all");
@@ -235,24 +239,30 @@ export default function AppPage({
       .finally(() => setRefreshing(false));
   }, [activeView, app.apple_id, project.id, refreshAndReload]);
 
-  useEffect(() => {
-    if (tab !== "keywords") return;
+  const loadKeywords = useCallback(async () => {
     const token = beginKeywordRequest();
-    api
-      .keywords(project.id, app.apple_id)
-      .then((nextKeywords) => {
-        if (isCurrentKeywordRequest(token)) setKeywords(nextKeywords);
-      })
-      .catch((reason: Error) => {
-        if (isCurrentKeywordRequest(token)) setError(reason.message);
-      });
+    setKeywordLoad({ scope: appScope, state: "loading" });
+    try {
+      const nextKeywords = await api.keywords(project.id, app.apple_id);
+      if (!isCurrentKeywordRequest(token)) return;
+      setKeywords(nextKeywords);
+      setKeywordLoad({ scope: appScope, state: "loaded" });
+    } catch (reason) {
+      if (!isCurrentKeywordRequest(token)) return;
+      setError((reason as Error).message);
+      setKeywordLoad({ scope: appScope, state: "error" });
+    }
   }, [
     app.apple_id,
+    appScope,
     beginKeywordRequest,
     isCurrentKeywordRequest,
     project.id,
-    tab,
   ]);
+
+  useEffect(() => {
+    if (tab === "keywords") void loadKeywords();
+  }, [loadKeywords, tab]);
 
   const refresh = async () => {
     setRefreshing(true);
@@ -260,9 +270,7 @@ export default function AppPage({
     try {
       const committed = await refreshAndReload(true);
       if (committed && tab === "keywords") {
-        const token = beginKeywordRequest();
-        const nextKeywords = await api.keywords(project.id, app.apple_id);
-        if (isCurrentKeywordRequest(token)) setKeywords(nextKeywords);
+        await loadKeywords();
       }
     } catch (reason) {
       setError((reason as Error).message);
@@ -756,15 +764,37 @@ export default function AppPage({
           ) : tab === "overview" ? (
             <Overview view={activeView} />
           ) : tab === "keywords" ? (
-            <KeywordsTable
-              projectId={project.id}
-              appId={app.apple_id}
-              keywords={keywords}
-              storefronts={activeView?.storefronts ?? []}
-              countryFilter={keywordCountryFilter}
-              onCountryFilterChange={setKeywordCountryFilter}
-              onChange={setKeywords}
-            />
+            keywordLoad.scope === appScope &&
+            keywordLoad.state === "loaded" ? (
+              <KeywordsTable
+                projectId={project.id}
+                appId={app.apple_id}
+                keywords={keywords}
+                countries={countries}
+                defaultCountry={app.main_country}
+                countryFilter={keywordCountryFilter}
+                onCountryFilterChange={setKeywordCountryFilter}
+                onChange={setKeywords}
+              />
+            ) : keywordLoad.scope === appScope &&
+              keywordLoad.state === "error" ? (
+              <div className="keyword-empty">
+                <h2>Project keywords unavailable.</h2>
+                <p>Use Refresh above to try again.</p>
+              </div>
+            ) : (
+              <div
+                className="content-loading"
+                role="status"
+                aria-label="Loading project keywords"
+              >
+                <span className="registry-loader" aria-hidden="true">
+                  <i />
+                  <i />
+                  <i />
+                </span>
+              </div>
+            )
           ) : (
             <ReviewsPanel
               projectId={project.id}
@@ -787,7 +817,7 @@ export default function AppPage({
           title="Delete app from this project?"
           description={`“${
             details?.name ?? app.name ?? app.apple_id
-          }” and its stored snapshots, reviews, storefronts, and keywords will be permanently removed from ${project.name}.`}
+          }” and its stored snapshots, reviews, and storefronts will be permanently removed from ${project.name}. Project keywords remain available to the other apps.`}
           confirmLabel="Delete app"
           busy={deletingApp}
           onCancel={() => {

@@ -7,7 +7,7 @@ use appstore_api::{
 };
 use asapi_app::{
     AddApp, AddKeyword, AddStorefront, AppService, CreateProject, RefreshApp, RefreshKeyword,
-    RenameProject, UpdateKeyword, UpdateStorefront,
+    RenameProject, UpdateKeyword, UpdateKeywordMetrics, UpdateStorefront,
 };
 use axum::{
     extract::{Path, Query, State},
@@ -58,15 +58,19 @@ pub fn router(service: AppService) -> Router {
             get(list_reviews),
         )
         .route(
-            "/projects/{project_id}/apps/{app_id}/keywords",
+            "/projects/{project_id}/keywords",
             get(list_keywords).post(add_keyword),
         )
         .route(
-            "/projects/{project_id}/apps/{app_id}/keywords/refresh",
+            "/projects/{project_id}/keywords/refresh",
             post(refresh_keywords),
         )
         .route(
-            "/projects/{project_id}/apps/{app_id}/keywords/{query_id}",
+            "/projects/{project_id}/keywords/metrics",
+            patch(update_keyword_metrics),
+        )
+        .route(
+            "/projects/{project_id}/keywords/{query_id}",
             patch(update_keyword).delete(delete_keyword),
         )
         .route("/query/search", post(raw_search))
@@ -286,52 +290,66 @@ async fn list_reviews(
     Ok(Json(json!({"data": page})))
 }
 
+#[derive(Deserialize)]
+struct KeywordRankingQuery {
+    app_id: Option<i64>,
+}
+
 async fn list_keywords(
     State(service): State<AppService>,
-    Path((project_id, app_id)): Path<(String, i64)>,
+    Path(project_id): Path<String>,
+    Query(query): Query<KeywordRankingQuery>,
 ) -> ApiResult<Json<Value>> {
     Ok(Json(
-        json!({"data": service.keywords(&project_id, app_id).await?}),
+        json!({"data": service.keywords(&project_id, query.app_id).await?}),
     ))
 }
 
 async fn add_keyword(
     State(service): State<AppService>,
-    Path((project_id, app_id)): Path<(String, i64)>,
+    Path(project_id): Path<String>,
     Json(input): Json<AddKeyword>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
-    let keyword = service.add_keyword(&project_id, app_id, &input).await?;
+    let keyword = service.add_keyword(&project_id, &input).await?;
     Ok((StatusCode::CREATED, Json(json!({"data": keyword}))))
 }
 
 async fn update_keyword(
     State(service): State<AppService>,
-    Path((project_id, app_id, query_id)): Path<(String, i64, i64)>,
+    Path((project_id, query_id)): Path<(String, i64)>,
     Json(input): Json<UpdateKeyword>,
 ) -> ApiResult<Json<Value>> {
     let keyword = service
-        .update_keyword(&project_id, app_id, query_id, &input.notes)
+        .update_keyword(&project_id, query_id, &input.notes)
         .await?;
+    Ok(Json(json!({"data": keyword})))
+}
+
+async fn update_keyword_metrics(
+    State(service): State<AppService>,
+    Path(project_id): Path<String>,
+    Json(input): Json<UpdateKeywordMetrics>,
+) -> ApiResult<Json<Value>> {
+    let keyword = service.update_keyword_metrics(&project_id, &input).await?;
     Ok(Json(json!({"data": keyword})))
 }
 
 async fn delete_keyword(
     State(service): State<AppService>,
-    Path((project_id, app_id, query_id)): Path<(String, i64, i64)>,
+    Path((project_id, query_id)): Path<(String, i64)>,
 ) -> ApiResult<StatusCode> {
-    service
-        .delete_keyword(&project_id, app_id, query_id)
-        .await?;
+    service.delete_keyword(&project_id, query_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn refresh_keywords(
     State(service): State<AppService>,
-    Path((project_id, app_id)): Path<(String, i64)>,
+    Path(project_id): Path<String>,
+    Query(query): Query<KeywordRankingQuery>,
     Json(input): Json<RefreshKeyword>,
 ) -> ApiResult<Json<Value>> {
     let keywords = service
-        .refresh_keywords(&project_id, app_id, input.query_id, input.force)
+        .refresh_keywords(&project_id, query.app_id, input.query_id, input.force)
         .await?;
     Ok(Json(json!({"data": keywords})))
 }

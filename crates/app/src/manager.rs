@@ -380,4 +380,79 @@ mod tests {
             "WAL should be absent or empty after graceful close"
         );
     }
+
+    #[tokio::test]
+    async fn project_keyword_migration_preserves_shared_data_and_drops_app_links() {
+        let temporary = tempfile::tempdir().unwrap();
+        let database = temporary.path().join("migration.sqlite3");
+        let pool = open_pool(&database).await.unwrap();
+        for migration in [
+            include_str!("../migrations/0001_initial.sql"),
+            include_str!("../migrations/0002_review_rating_index.sql"),
+            include_str!("../migrations/0003_keyword_result_details.sql"),
+            include_str!("../migrations/0004_app_estimates.sql"),
+            include_str!("../migrations/0005_keyword_metrics.sql"),
+        ] {
+            sqlx::raw_sql(migration).execute(&pool).await.unwrap();
+        }
+
+        let now = chrono::Utc::now().to_rfc3339();
+        for apple_id in [1001_i64, 1002_i64] {
+            sqlx::query("INSERT INTO apps (apple_id, created_at) VALUES (?, ?)")
+                .bind(apple_id)
+                .bind(&now)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        sqlx::query(indoc! {r#"
+            INSERT INTO keyword_queries (query, normalized_query, country, created_at)
+            VALUES
+                ('Music', 'music', 'us', ?),
+                ('Orphan', 'orphan', 'us', ?)
+        "#})
+        .bind(&now)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(indoc! {r#"
+            INSERT INTO app_keywords (app_id, query_id, notes, created_at)
+            VALUES
+                (1, 1, '', ?),
+                (2, 1, 'Shared note', ?)
+        "#})
+        .bind(&now)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::raw_sql(include_str!("../migrations/0006_project_keywords.sql"))
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let keywords = sqlx::query_as::<_, (String, String)>(
+            "SELECT normalized_query, notes FROM keyword_queries ORDER BY id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            keywords,
+            vec![("music".to_string(), "Shared note".to_string())]
+        );
+        let link_table_exists: bool = sqlx::query_scalar(indoc! {r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM sqlite_master
+                WHERE type = 'table' AND name = 'app_keywords'
+            )
+        "#})
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(!link_table_exists);
+    }
 }

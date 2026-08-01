@@ -2008,10 +2008,23 @@ a {
 
 .keyword-table {
   width: 100%;
-  min-width: 980px;
+  min-width: 1140px;
   border-collapse: separate;
   border-spacing: 0;
   table-layout: fixed;
+}
+
+.keyword-table caption {
+  height: 29px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper);
+  color: var(--ink-faint);
+  font-family: var(--font-data);
+  font-size: 9px;
+  font-weight: 700;
+  text-align: left;
+  text-transform: uppercase;
 }
 
 .keyword-table th {
@@ -2032,31 +2045,39 @@ a {
 }
 
 .keyword-table th:nth-child(1) {
-  width: 18%;
+  width: 14%;
 }
 
 .keyword-table th:nth-child(2) {
-  width: 13%;
+  width: 9%;
 }
 
 .keyword-table th:nth-child(3) {
-  width: 10%;
+  width: 7%;
 }
 
 .keyword-table th:nth-child(4) {
-  width: 10%;
+  width: 8%;
 }
 
 .keyword-table th:nth-child(5) {
-  width: 15%;
+  width: 9%;
 }
 
 .keyword-table th:nth-child(6) {
-  width: 25%;
+  width: 9%;
 }
 
 .keyword-table th:nth-child(7) {
-  width: 9%;
+  width: 13%;
+}
+
+.keyword-table th:nth-child(8) {
+  width: 23%;
+}
+
+.keyword-table th:nth-child(9) {
+  width: 8%;
 }
 
 .keyword-table td {
@@ -2150,6 +2171,52 @@ a {
   color: var(--ink);
   font-family: var(--font-data);
   font-size: 14px;
+}
+
+.keyword-metric-cell {
+  font-family: var(--font-data);
+}
+
+.keyword-metric {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 26px minmax(38px, 1fr);
+  align-items: center;
+  gap: 7px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.keyword-metric strong {
+  font-size: 13px;
+  text-align: right;
+}
+
+.metric-unavailable {
+  color: var(--ink-faint);
+  font-size: 9px;
+}
+
+.keyword-metric-track {
+  display: block;
+  height: 7px;
+  overflow: hidden;
+  border: 1px solid var(--rule);
+  background: var(--paper-deep);
+}
+
+.keyword-metric-fill {
+  display: block;
+  height: 100%;
+  background: var(--ochre);
+}
+
+.keyword-metric.favorable .keyword-metric-fill {
+  background: var(--olive);
+}
+
+.keyword-metric.unfavorable .keyword-metric-fill {
+  background: var(--oxide);
 }
 
 .not-ranked {

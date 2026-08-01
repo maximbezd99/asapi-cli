@@ -5,6 +5,7 @@ import type {
   Country,
   Envelope,
   Keyword,
+  KeywordEntity,
   MarketEstimate,
   Project,
   ReviewsPage,
@@ -157,7 +158,7 @@ export const api = {
   keywords: async (projectId: string, appId: number) =>
     (
       await request<ResponseEnvelope<Keyword[]>>(
-        `/api/v1/projects/${projectId}/apps/${appId}/keywords`,
+        `/api/v1/projects/${projectId}/keywords?app_id=${appId}`,
       )
     ).data,
 
@@ -169,7 +170,7 @@ export const api = {
   ) =>
     (
       await request<ResponseEnvelope<Keyword[]>>(
-        `/api/v1/projects/${projectId}/apps/${appId}/keywords/refresh`,
+        `/api/v1/projects/${projectId}/keywords/refresh?app_id=${appId}`,
         {
           method: "POST",
           body: JSON.stringify({ query_id: queryId, force }),
@@ -179,14 +180,13 @@ export const api = {
 
   addKeyword: async (
     projectId: string,
-    appId: number,
     keyword: string,
     country: string,
     notes = "",
   ) =>
     (
-      await request<ResponseEnvelope<Keyword>>(
-        `/api/v1/projects/${projectId}/apps/${appId}/keywords`,
+      await request<ResponseEnvelope<KeywordEntity>>(
+        `/api/v1/projects/${projectId}/keywords`,
         {
           method: "POST",
           body: JSON.stringify({ keyword, country, notes }),
@@ -194,9 +194,28 @@ export const api = {
       )
     ).data,
 
-  deleteKeyword: async (projectId: string, appId: number, queryId: number) =>
+  updateKeywordMetrics: async (
+    projectId: string,
+    keyword: string,
+    country: string,
+    metrics: {
+      difficulty?: number | null;
+      popularity?: number | null;
+    },
+  ) =>
+    (
+      await request<ResponseEnvelope<KeywordEntity>>(
+        `/api/v1/projects/${projectId}/keywords/metrics`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ keyword, country, ...metrics }),
+        },
+      )
+    ).data,
+
+  deleteKeyword: async (projectId: string, queryId: number) =>
     await request<void>(
-      `/api/v1/projects/${projectId}/apps/${appId}/keywords/${queryId}`,
+      `/api/v1/projects/${projectId}/keywords/${queryId}`,
       { method: "DELETE" },
     ),
 

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { api } from "../api";
 import { countryFlag, countryLabel, relativeTime } from "../format";
-import type { Keyword, Storefront, TrendPoint } from "../types";
+import type { Country, Keyword, TrendPoint } from "../types";
 import ConfirmDialog from "./ConfirmDialog";
 import Picker from "./Picker";
 import type { PickerOption } from "./Picker";
@@ -22,30 +22,33 @@ interface Props {
   projectId: string;
   appId: number;
   keywords: Keyword[];
-  storefronts: Storefront[];
+  countries: Country[];
+  defaultCountry: string;
   countryFilter: string;
   onCountryFilterChange: (country: string) => void;
   onChange: (keywords: Keyword[]) => void;
 }
 
-type SortKey = "keyword" | "country" | "position";
+type SortKey =
+  | "keyword"
+  | "country"
+  | "difficulty"
+  | "popularity"
+  | "position";
 type SortDirection = "asc" | "desc";
 
 export default function KeywordsTable({
   projectId,
   appId,
   keywords,
-  storefronts,
+  countries,
+  defaultCountry,
   countryFilter,
   onCountryFilterChange,
   onChange,
 }: Props) {
   const [keyword, setKeyword] = useState("");
-  const [country, setCountry] = useState(
-    storefronts.find((storefront) => storefront.is_main)?.country ??
-      storefronts[0]?.country ??
-      "us",
-  );
+  const [country, setCountry] = useState(defaultCountry);
   const [sortKey, setSortKey] = useState<SortKey>("position");
   const [sortDirection, setSortDirection] =
     useState<SortDirection>("asc");
@@ -53,33 +56,43 @@ export default function KeywordsTable({
   const [error, setError] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Keyword | null>(null);
 
-  const storefrontOptions = useMemo<PickerOption[]>(
+  const countryOptions = useMemo<PickerOption[]>(
     () =>
-      storefronts.map((storefront) => ({
-        value: storefront.country,
-        label: countryLabel(storefront.country),
-        triggerLabel: storefront.country.toUpperCase(),
-        meta: `${storefront.country.toUpperCase()}${
-          storefront.is_main ? " · Main" : ""
-        }`,
-        icon: countryFlag(storefront.country),
+      countries.map((item) => ({
+        value: item.code,
+        label: item.name,
+        triggerLabel: item.code.toUpperCase(),
+        meta: item.code.toUpperCase(),
+        icon: countryFlag(item.code),
       })),
-    [storefronts],
+    [countries],
   );
 
   const filterOptions = useMemo<PickerOption[]>(
-    () => [
-      {
-        value: "all",
-        label: "All storefronts",
-        triggerLabel: "All",
-        meta: `${storefronts.length} configured`,
-        icon: <Globe2 size={13} />,
-      },
-      ...storefrontOptions,
-    ],
-    [storefrontOptions, storefronts.length],
+    () => {
+      const tracked = new Set(keywords.map((item) => item.country));
+      return [
+        {
+          value: "all",
+          label: "All storefronts",
+          triggerLabel: "All",
+          meta: `${tracked.size} tracked`,
+          icon: <Globe2 size={13} />,
+        },
+        ...countryOptions.filter((option) => tracked.has(option.value)),
+      ];
+    },
+    [countryOptions, keywords],
   );
+
+  useEffect(() => {
+    if (
+      countryFilter !== "all" &&
+      !keywords.some((item) => item.country === countryFilter)
+    ) {
+      onCountryFilterChange("all");
+    }
+  }, [countryFilter, keywords, onCountryFilterChange]);
 
   const sorted = useMemo(() => {
     const items =
@@ -95,10 +108,17 @@ export default function KeywordsTable({
         });
       } else if (sortKey === "country") {
         comparison = left.country.localeCompare(right.country);
+      } else if (sortKey === "difficulty" || sortKey === "popularity") {
+        const leftScore = left[sortKey];
+        const rightScore = right[sortKey];
+        if (leftScore == null && rightScore != null) return 1;
+        if (leftScore != null && rightScore == null) return -1;
+        comparison = (leftScore ?? 0) - (rightScore ?? 0);
       } else {
+        if (left.position == null && right.position != null) return 1;
+        if (left.position != null && right.position == null) return -1;
         comparison =
-          (left.position ?? Number.MAX_SAFE_INTEGER) -
-          (right.position ?? Number.MAX_SAFE_INTEGER);
+          (left.position ?? 0) - (right.position ?? 0);
       }
       if (comparison === 0) {
         comparison = left.keyword.localeCompare(right.keyword, undefined, {
@@ -125,13 +145,8 @@ export default function KeywordsTable({
     setBusy(true);
     setError("");
     try {
-      const created = await api.addKeyword(
-        projectId,
-        appId,
-        keyword.trim(),
-        country,
-      );
-      onChange([...keywords, created]);
+      await api.addKeyword(projectId, keyword.trim(), country);
+      onChange(await api.keywords(projectId, appId));
       setKeyword("");
     } catch (reason) {
       setError((reason as Error).message);
@@ -145,7 +160,7 @@ export default function KeywordsTable({
     setBusy(true);
     setError("");
     try {
-      await api.deleteKeyword(projectId, appId, deleteTarget.query_id);
+      await api.deleteKeyword(projectId, deleteTarget.query_id);
       onChange(
         keywords.filter((item) => item.query_id !== deleteTarget.query_id),
       );
@@ -159,16 +174,16 @@ export default function KeywordsTable({
 
   const removeFromAllStorefronts = async () => {
     if (!deleteTarget) return;
-    const normalized = deleteTarget.keyword.trim().toLocaleLowerCase();
+    const normalized = deleteTarget.normalized_keyword;
     const matches = keywords.filter(
-      (item) => item.keyword.trim().toLocaleLowerCase() === normalized,
+      (item) => item.normalized_keyword === normalized,
     );
     setBusy(true);
     setError("");
     try {
       const results = await Promise.allSettled(
         matches.map((item) =>
-          api.deleteKeyword(projectId, appId, item.query_id),
+          api.deleteKeyword(projectId, item.query_id),
         ),
       );
       const removedIds = new Set(
@@ -193,44 +208,13 @@ export default function KeywordsTable({
     }
   };
 
-  const addToStorefronts = async (
-    source: Keyword,
-    selection: string,
-    available: string[],
-  ) => {
-    const targets = selection === "__all__" ? available : [selection];
-    if (!targets.length) return;
+  const addToStorefront = async (source: Keyword, selection: string) => {
+    if (!selection) return;
     setBusy(true);
     setError("");
     try {
-      const results = await Promise.allSettled(
-        targets.map((targetCountry) =>
-          api.addKeyword(
-            projectId,
-            appId,
-            source.keyword,
-            targetCountry,
-          ),
-        ),
-      );
-      const created = results.flatMap((result) =>
-        result.status === "fulfilled" ? [result.value] : [],
-      );
-      const createdIds = new Set(created.map((item) => item.query_id));
-      if (created.length) {
-        onChange([
-          ...keywords.filter((item) => !createdIds.has(item.query_id)),
-          ...created,
-        ]);
-      }
-      const failed = results.length - created.length;
-      if (failed) {
-        setError(
-          `Added “${source.keyword}” to ${created.length} storefront${
-            created.length === 1 ? "" : "s"
-          }; ${failed} failed. Retry the remaining storefronts.`,
-        );
-      }
+      await api.addKeyword(projectId, source.keyword, selection);
+      onChange(await api.keywords(projectId, appId));
     } catch (reason) {
       setError((reason as Error).message);
     } finally {
@@ -242,7 +226,7 @@ export default function KeywordsTable({
     <div className="keywords-panel">
       <div className="keyword-toolbar">
         <form className="keyword-create" onSubmit={submit}>
-          <strong>Add keyword</strong>
+          <strong>Project keyword</strong>
           <input
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
@@ -251,7 +235,7 @@ export default function KeywordsTable({
           />
           <Picker
             value={country}
-            options={storefrontOptions}
+            options={countryOptions}
             onChange={setCountry}
             ariaLabel="Keyword storefront"
             className="keyword-country-picker"
@@ -286,6 +270,10 @@ export default function KeywordsTable({
         sorted.length ? (
           <div className="keyword-table-wrap">
             <table className="keyword-table">
+              <caption>
+                Project keywords · rank shown for selected app · color favors
+                high popularity and low difficulty
+              </caption>
               <thead>
                 <tr>
                   <SortableHeading
@@ -311,6 +299,22 @@ export default function KeywordsTable({
                     onSort={changeSort}
                     number
                   />
+                  <SortableHeading
+                    label="Popularity"
+                    column="popularity"
+                    activeColumn={sortKey}
+                    direction={sortDirection}
+                    onSort={changeSort}
+                    number
+                  />
+                  <SortableHeading
+                    label="Difficulty"
+                    column="difficulty"
+                    activeColumn={sortKey}
+                    direction={sortDirection}
+                    onSort={changeSort}
+                    number
+                  />
                   <th>Trend</th>
                   <th>Apps in ranking</th>
                   <th aria-label="Actions" />
@@ -318,18 +322,17 @@ export default function KeywordsTable({
               </thead>
               <tbody>
                 {sorted.map((item) => {
-                  const normalized = item.keyword.trim().toLocaleLowerCase();
+                  const normalized = item.normalized_keyword;
                   const trackedCountries = new Set(
                     keywords
                       .filter(
                         (candidate) =>
-                          candidate.keyword.trim().toLocaleLowerCase() ===
-                          normalized,
+                          candidate.normalized_keyword === normalized,
                       )
                       .map((candidate) => candidate.country),
                   );
-                  const available = storefronts
-                    .map((storefront) => storefront.country)
+                  const available = countries
+                    .map((item) => item.code)
                     .filter((code) => !trackedCountries.has(code));
                   return (
                     <KeywordRow
@@ -338,7 +341,7 @@ export default function KeywordsTable({
                       disabled={busy}
                       availableCountries={available}
                       onAddToStorefront={(selection) =>
-                        void addToStorefronts(item, selection, available)
+                        void addToStorefront(item, selection)
                       }
                       onDelete={() => setDeleteTarget(item)}
                       onRefreshRanking={async () => {
@@ -357,34 +360,33 @@ export default function KeywordsTable({
           </div>
         ) : (
           <div className="keyword-empty compact-filter-empty">
-            <h2>No keywords in this storefront.</h2>
-            <p>Choose All or add a storefront-specific query above.</p>
+            <h2>No project keywords in this storefront.</h2>
+            <p>Choose All or add a project keyword for this storefront.</p>
           </div>
         )
       ) : (
         <div className="keyword-empty">
-          <h2>No keywords yet.</h2>
+          <h2>No project keywords yet.</h2>
           <p>
-            Add a storefront-specific query above. Shared query results are
-            cached once per project.
+            Add one above. It will appear in every tracked app with that app’s
+            rank and trend.
           </p>
         </div>
       )}
 
       {deleteTarget ? (
         <ConfirmDialog
-          title="Delete tracked keyword?"
-          description={`“${deleteTarget.keyword}” will be removed from ${countryLabel(
+          title="Delete project keyword?"
+          description={`“${deleteTarget.keyword}” will be removed from the project in ${countryLabel(
             deleteTarget.country,
-          )}. Its other storefronts stay tracked.`}
-          confirmLabel={`Delete from ${deleteTarget.country.toUpperCase()}`}
+          )}. It will disappear from every app; its other storefronts stay tracked.`}
+          confirmLabel={`Delete ${deleteTarget.country.toUpperCase()} keyword`}
           alternateLabel={
             keywords.filter(
               (item) =>
-                item.keyword.trim().toLocaleLowerCase() ===
-                deleteTarget.keyword.trim().toLocaleLowerCase(),
+                item.normalized_keyword === deleteTarget.normalized_keyword,
             ).length > 1
-              ? "Delete from all"
+              ? "Delete all storefronts"
               : undefined
           }
           busy={busy}
@@ -466,16 +468,6 @@ function KeywordRow({
       ? keyword.previous_position - keyword.position
       : 0;
   const addOptions: PickerOption[] = [
-    ...(availableCountries.length > 1
-      ? [
-          {
-            value: "__all__",
-            label: "All remaining storefronts",
-            meta: `${availableCountries.length} storefronts`,
-            icon: <Globe2 size={13} />,
-          },
-        ]
-      : []),
     ...availableCountries.map((code) => ({
       value: code,
       label: countryLabel(code),
@@ -508,6 +500,8 @@ function KeywordRow({
           </>
         )}
       </td>
+      <KeywordMetricCell label="Popularity" value={keyword.popularity} />
+      <KeywordMetricCell label="Difficulty" value={keyword.difficulty} />
       <td>
         <div className="trend-cell">
           <span
@@ -541,8 +535,8 @@ function KeywordRow({
             onChange={onAddToStorefront}
             ariaLabel={
               availableCountries.length
-                ? `Add ${keyword.keyword} to another storefront`
-                : `${keyword.keyword} is tracked in every storefront`
+                ? `Add project keyword ${keyword.keyword} to another storefront`
+                : `${keyword.keyword} is tracked in every App Store storefront`
             }
             triggerContent={<Plus size={13} />}
             iconOnly
@@ -565,6 +559,74 @@ function KeywordRow({
         </div>
       </td>
     </tr>
+  );
+}
+
+function KeywordMetricCell({
+  label,
+  value,
+}: {
+  label: "Difficulty" | "Popularity";
+  value: number | null;
+}) {
+  const tone =
+    value == null
+      ? null
+      : label === "Popularity"
+        ? value <= 20
+          ? "unfavorable"
+          : value <= 60
+            ? "neutral"
+            : "favorable"
+        : value <= 20
+          ? "favorable"
+          : value <= 60
+            ? "neutral"
+            : "unfavorable";
+  const interpretation =
+    tone === "favorable"
+      ? label === "Popularity"
+        ? "high popularity"
+        : "low difficulty"
+      : tone === "unfavorable"
+        ? label === "Popularity"
+          ? "low popularity"
+          : "high difficulty"
+        : `medium ${label.toLowerCase()}`;
+
+  return (
+    <td className="number keyword-metric-cell">
+      {value == null ? (
+        <span
+          className="metric-unavailable"
+          title={`${label} not provided`}
+          aria-label={`${label}: not provided`}
+        >
+          —
+        </span>
+      ) : (
+        <span
+          className={`keyword-metric ${tone}`}
+          title={`${label}: ${value} out of 100 · ${interpretation}`}
+          role="meter"
+          aria-label={label}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={value}
+          aria-valuetext={`${value} out of 100, ${interpretation}`}
+        >
+          <strong aria-hidden="true">
+            {Number.isInteger(value) ? value : value.toFixed(1)}
+          </strong>
+          <span className="keyword-metric-track" aria-hidden="true">
+            <span
+              className="keyword-metric-fill"
+              style={{ width: `${value}%` }}
+            />
+          </span>
+        </span>
+      )}
+    </td>
   );
 }
 

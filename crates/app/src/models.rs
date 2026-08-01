@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use sqlx::FromRow;
 
@@ -126,11 +126,20 @@ pub struct ReviewsPage {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct KeywordView {
+pub struct KeywordEntity {
     pub query_id: i64,
     pub keyword: String,
-    pub notes: String,
+    pub normalized_keyword: String,
     pub country: String,
+    pub notes: String,
+    pub difficulty: Option<f64>,
+    pub popularity: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct KeywordView {
+    #[serde(flatten)]
+    pub entity: KeywordEntity,
     pub last_updated: Option<String>,
     pub position: Option<i64>,
     pub previous_position: Option<i64>,
@@ -200,6 +209,48 @@ pub struct UpdateKeyword {
     pub notes: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum PatchValue<T> {
+    #[default]
+    Missing,
+    Present(Option<T>),
+}
+
+impl<T> PatchValue<T> {
+    pub fn is_present(&self) -> bool {
+        matches!(self, Self::Present(_))
+    }
+
+    pub fn apply(self, current: Option<T>) -> Option<T> {
+        match self {
+            Self::Missing => current,
+            Self::Present(value) => value,
+        }
+    }
+}
+
+impl<'de, T> Deserialize<'de> for PatchValue<T>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Option::<T>::deserialize(deserializer).map(Self::Present)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateKeywordMetrics {
+    pub keyword: String,
+    pub country: String,
+    #[serde(default)]
+    pub difficulty: PatchValue<f64>,
+    #[serde(default)]
+    pub popularity: PatchValue<f64>,
+}
+
 #[derive(Debug, Deserialize, Default)]
 pub struct RefreshApp {
     pub country: Option<String>,
@@ -216,4 +267,26 @@ pub struct RefreshKeyword {
 
 fn default_country() -> String {
     "us".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keyword_metric_patch_distinguishes_missing_null_and_value() {
+        let missing: UpdateKeywordMetrics =
+            serde_json::from_str(r#"{"keyword":"music","country":"us"}"#).unwrap();
+        assert_eq!(missing.difficulty, PatchValue::Missing);
+
+        let null: UpdateKeywordMetrics =
+            serde_json::from_str(r#"{"keyword":"music","country":"us","difficulty":null}"#)
+                .unwrap();
+        assert_eq!(null.difficulty, PatchValue::Present(None));
+
+        let value: UpdateKeywordMetrics =
+            serde_json::from_str(r#"{"keyword":"music","country":"us","popularity":72.5}"#)
+                .unwrap();
+        assert_eq!(value.popularity, PatchValue::Present(Some(72.5)));
+    }
 }

@@ -224,11 +224,17 @@ export interface TrendPoint {
   position: number | null;
 }
 
-export interface Keyword {
+export interface KeywordEntity {
   query_id: number;
   keyword: string;
-  notes: string;
+  normalized_keyword: string;
   country: string;
+  notes: string;
+  difficulty: number | null;
+  popularity: number | null;
+}
+
+export interface Keyword extends KeywordEntity {
   last_updated: string | null;
   position: number | null;
   previous_position: number | null;

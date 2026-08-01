@@ -86,29 +86,44 @@ pub fn document() -> Value {
                 ],
                 "get": operation("Read and lazily refresh one review page", None, "200")
             },
-            "/projects/{project_id}/apps/{app_id}/keywords": {
-                "parameters": [
-                    path_parameter("project_id", "Project UUID"),
-                    path_parameter("app_id", "Apple App Store ID")
-                ],
-                "get": operation("List tracked keywords with ranking history", None, "200"),
-                "post": operation("Track a storefront-specific keyword", Some("AddKeyword"), "201")
+            "/projects/{project_id}/keywords": {
+                "parameters": [path_parameter("project_id", "Project UUID")],
+                "get": with_parameters(
+                    operation("List project keywords, optionally with one app's ranking history", None, "200"),
+                    vec![integer_query_parameter(
+                        "app_id",
+                        "Optional tracked Apple App Store ID used as the ranking context",
+                        false
+                    )]
+                ),
+                "post": operation("Track a storefront-specific keyword for the project", Some("AddKeyword"), "201")
             },
-            "/projects/{project_id}/apps/{app_id}/keywords/{query_id}": {
+            "/projects/{project_id}/keywords/{query_id}": {
                 "parameters": [
                     path_parameter("project_id", "Project UUID"),
-                    path_parameter("app_id", "Apple App Store ID"),
-                    path_parameter("query_id", "Shared keyword query ID")
+                    path_parameter("query_id", "Project keyword query ID")
                 ],
                 "patch": operation("Update keyword notes", Some("UpdateKeyword"), "200"),
-                "delete": operation("Stop tracking a keyword", None, "204")
+                "delete": operation("Stop tracking a project keyword", None, "204")
             },
-            "/projects/{project_id}/apps/{app_id}/keywords/refresh": {
-                "parameters": [
-                    path_parameter("project_id", "Project UUID"),
-                    path_parameter("app_id", "Apple App Store ID")
-                ],
-                "post": operation("Refresh shared keyword query caches", Some("RefreshKeyword"), "200")
+            "/projects/{project_id}/keywords/refresh": {
+                "parameters": [path_parameter("project_id", "Project UUID")],
+                "post": with_parameters(
+                    operation("Refresh project keyword query caches", Some("RefreshKeyword"), "200"),
+                    vec![integer_query_parameter(
+                        "app_id",
+                        "Optional tracked Apple App Store ID used as the returned ranking context",
+                        false
+                    )]
+                )
+            },
+            "/projects/{project_id}/keywords/metrics": {
+                "parameters": [path_parameter("project_id", "Project UUID")],
+                "patch": operation(
+                    "Set or clear external metrics on a canonical storefront keyword",
+                    Some("UpdateKeywordMetrics"),
+                    "200"
+                )
             },
             "/query/search": {
                 "post": operation("Equivalent to asapi search", Some("SearchRequest"), "200")
@@ -186,6 +201,14 @@ fn operation(summary: &str, request_schema: Option<&str>, success: &str) -> Valu
         );
     }
     Value::Object(operation)
+}
+
+fn with_parameters(mut operation: Value, parameters: Vec<Value>) -> Value {
+    operation
+        .as_object_mut()
+        .expect("OpenAPI operation must be an object")
+        .insert("parameters".to_string(), Value::Array(parameters));
+    operation
 }
 
 fn path_parameter(name: &str, description: &str) -> Value {
@@ -289,6 +312,36 @@ fn schemas() -> Value {
             &["keyword", "country"]
         ),
         "UpdateKeyword": object(json!({"notes": {"type": "string"}}), &["notes"]),
+        "UpdateKeywordMetrics": {
+            "type": "object",
+            "properties": {
+                "keyword": {
+                    "type": "string",
+                    "description": "Matched after trimming, whitespace collapsing, and lowercasing."
+                },
+                "country": {
+                    "type": "string",
+                    "description": "Two-letter storefront country code."
+                },
+                "difficulty": {
+                    "type": ["number", "null"],
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "Optional external 0–100 score. Use null to clear it."
+                },
+                "popularity": {
+                    "type": ["number", "null"],
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "Optional external 0–100 score. Use null to clear it."
+                }
+            },
+            "required": ["keyword", "country"],
+            "anyOf": [
+                {"required": ["difficulty"]},
+                {"required": ["popularity"]}
+            ]
+        },
         "RefreshKeyword": object(
             json!({
                 "query_id": {"type": ["integer", "null"]},
@@ -371,4 +424,24 @@ fn object(properties: Value, required: &[&str]) -> Value {
         "properties": properties,
         "required": required
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keywords_are_documented_as_project_resources_with_app_rank_context() {
+        let document = document();
+        let paths = document["paths"].as_object().unwrap();
+        assert!(paths.contains_key("/projects/{project_id}/keywords"));
+        assert!(paths.contains_key("/projects/{project_id}/keywords/{query_id}"));
+        assert!(!paths.contains_key("/projects/{project_id}/apps/{app_id}/keywords"));
+        let parameters = document["paths"]["/projects/{project_id}/keywords"]["get"]["parameters"]
+            .as_array()
+            .unwrap();
+        assert!(parameters
+            .iter()
+            .any(|parameter| { parameter["name"] == "app_id" && parameter["required"] == false }));
+    }
 }

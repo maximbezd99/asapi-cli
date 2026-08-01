@@ -66,9 +66,11 @@ queries.
   24-hour refresh threshold and paginate lazily.
 - App observations are retained for 30 days; upstream history cannot be
   backfilled.
-- Keyword ranking results are shared and cached by normalized query and country
-  within a project so multiple tracked apps do not repeat the same upstream
-  request.
+- Keywords belong to the project and are shared by every tracked app. Each
+  app's Keywords register shows its own position and trend against the same
+  normalized query, country, cached results, notes, and external metrics.
+  Agents may attach optional externally sourced 0–100 difficulty and popularity
+  scores to that storefront-aware keyword identity.
 - Each project is stored in its own SQLite database under
   `asapi-storage/projects`. The default base is
   `~/.local/share/asapi-storage`; callers may provide an explicit base path.

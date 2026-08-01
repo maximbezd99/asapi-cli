@@ -20,11 +20,13 @@ use sqlx::{FromRow, Row, Sqlite, SqlitePool, Transaction};
 use tokio::sync::Mutex;
 
 use crate::{
+    keyword::KeywordIdentity,
     manager::{ProjectHandle, ProjectManager},
     models::{
-        AddKeyword, AppEstimateMetric, AppEstimatesView, AppView, HistorySnapshot,
-        KeywordTrendPoint, KeywordView, PopularityCountry, PopularityView, RankedApp, Review,
-        ReviewSummary, ReviewsPage, Storefront, TrackedAppSummary, UpdateStorefront,
+        AddKeyword, AppEstimateMetric, AppEstimatesView, AppView, HistorySnapshot, KeywordEntity,
+        KeywordTrendPoint, KeywordView, PatchValue, PopularityCountry, PopularityView, RankedApp,
+        Review, ReviewSummary, ReviewsPage, Storefront, TrackedAppSummary, UpdateKeywordMetrics,
+        UpdateStorefront,
     },
 };
 
@@ -59,8 +61,22 @@ struct AppSummaryRow {
 struct KeywordRecord {
     query_id: i64,
     query: String,
+    normalized_query: String,
+    country: String,
+    difficulty: Option<f64>,
+    popularity: Option<f64>,
+    notes: String,
+}
+
+#[derive(FromRow)]
+struct KeywordEntityRecord {
+    query_id: i64,
+    query: String,
+    normalized_query: String,
     country: String,
     notes: String,
+    difficulty: Option<f64>,
+    popularity: Option<f64>,
 }
 
 #[derive(FromRow)]
@@ -798,140 +814,164 @@ impl AppService {
         })
     }
 
-    pub async fn add_keyword(
-        &self,
-        project_id: &str,
-        app_id: i64,
-        input: &AddKeyword,
-    ) -> Result<KeywordView> {
-        let country = validate_country(&input.country)?;
-        let normalized = normalize_keyword(&input.keyword)?;
-        let display = input.keyword.trim();
+    pub async fn add_keyword(&self, project_id: &str, input: &AddKeyword) -> Result<KeywordEntity> {
+        let identity = KeywordIdentity::new(&input.keyword, &input.country)?;
         let project = self.manager.get(project_id).await?;
-        let app = find_app(&project.pool, app_id).await?;
-        require_storefront(&project.pool, app.id, &country)
-            .await
-            .context("add the storefront to the app before tracking keywords in it")?;
-        let mut tx = project.pool.begin().await?;
-        sqlx::query(indoc! {r#"
+        let result = sqlx::query(indoc! {r#"
             INSERT INTO keyword_queries (
                 query,
                 normalized_query,
                 country,
+                notes,
                 created_at
             )
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT (normalized_query, country) DO NOTHING
+            VALUES (?, ?, ?, ?, ?)
         "#})
-        .bind(display)
-        .bind(&normalized)
-        .bind(&country)
+        .bind(identity.display())
+        .bind(identity.normalized().as_str())
+        .bind(identity.country())
+        .bind(input.notes.trim())
         .bind(Utc::now().to_rfc3339())
-        .execute(&mut *tx)
-        .await?;
-        let query_id: i64 = sqlx::query_scalar(indoc! {r#"
-            SELECT id
+        .execute(&project.pool)
+        .await
+        .context("this keyword and storefront are already tracked in the project")?;
+        let query_id = result.last_insert_rowid();
+        self.refresh_keyword_query(project_id, &project, query_id, false)
+            .await?;
+        keyword_entity_by_id(&project.pool, query_id).await
+    }
+
+    pub async fn update_keyword_metrics(
+        &self,
+        project_id: &str,
+        input: &UpdateKeywordMetrics,
+    ) -> Result<KeywordEntity> {
+        if !input.difficulty.is_present() && !input.popularity.is_present() {
+            bail!("provide difficulty, popularity, or both");
+        }
+        for (name, patch) in [
+            ("difficulty", &input.difficulty),
+            ("popularity", &input.popularity),
+        ] {
+            if let PatchValue::Present(Some(value)) = patch {
+                validate_keyword_metric(name, *value)?;
+            }
+        }
+
+        let identity = KeywordIdentity::new(&input.keyword, &input.country)?;
+        let project = self.manager.get(project_id).await?;
+        let current = sqlx::query_as::<_, KeywordEntityRecord>(indoc! {r#"
+            SELECT
+                id AS query_id,
+                query,
+                normalized_query,
+                country,
+                notes,
+                difficulty,
+                popularity
             FROM keyword_queries
             WHERE normalized_query = ? AND country = ?
         "#})
-        .bind(&normalized)
-        .bind(&country)
-        .fetch_one(&mut *tx)
-        .await?;
+        .bind(identity.normalized().as_str())
+        .bind(identity.country())
+        .fetch_optional(&project.pool)
+        .await?
+        .with_context(|| {
+            format!(
+                "keyword '{}' is not tracked in storefront {}",
+                identity.display(),
+                identity.country().to_uppercase()
+            )
+        })?;
+
+        let difficulty = input.difficulty.clone().apply(current.difficulty);
+        let popularity = input.popularity.clone().apply(current.popularity);
         sqlx::query(indoc! {r#"
-            INSERT INTO app_keywords (app_id, query_id, notes, created_at)
-            VALUES (?, ?, ?, ?)
+            UPDATE keyword_queries
+            SET difficulty = ?, popularity = ?
+            WHERE id = ?
         "#})
-        .bind(app.id)
-        .bind(query_id)
-        .bind(input.notes.trim())
-        .bind(Utc::now().to_rfc3339())
-        .execute(&mut *tx)
-        .await
-        .context("this keyword is already tracked for the app")?;
-        tx.commit().await?;
-        self.refresh_keyword_query(project_id, &project, query_id, false)
-            .await?;
-        self.keyword(project_id, app_id, query_id).await
+        .bind(difficulty)
+        .bind(popularity)
+        .bind(current.query_id)
+        .execute(&project.pool)
+        .await?;
+
+        Ok(keyword_entity(
+            current.query_id,
+            current.query,
+            current.normalized_query,
+            current.country,
+            current.notes,
+            difficulty,
+            popularity,
+        ))
     }
 
     pub async fn update_keyword(
         &self,
         project_id: &str,
-        app_id: i64,
         query_id: i64,
         notes: &str,
-    ) -> Result<KeywordView> {
+    ) -> Result<KeywordEntity> {
         let project = self.manager.get(project_id).await?;
-        let app = find_app(&project.pool, app_id).await?;
         let result = sqlx::query(indoc! {r#"
-            UPDATE app_keywords
+            UPDATE keyword_queries
             SET notes = ?
-            WHERE app_id = ? AND query_id = ?
+            WHERE id = ?
         "#})
         .bind(notes.trim())
-        .bind(app.id)
         .bind(query_id)
         .execute(&project.pool)
         .await?;
         if result.rows_affected() == 0 {
-            bail!("keyword {query_id} is not tracked for app {app_id}");
+            bail!("keyword {query_id} is not tracked in this project");
         }
-        self.keyword(project_id, app_id, query_id).await
+        keyword_entity_by_id(&project.pool, query_id).await
     }
 
-    pub async fn delete_keyword(&self, project_id: &str, app_id: i64, query_id: i64) -> Result<()> {
+    pub async fn delete_keyword(&self, project_id: &str, query_id: i64) -> Result<()> {
         let project = self.manager.get(project_id).await?;
-        let app = find_app(&project.pool, app_id).await?;
-        let mut tx = project.pool.begin().await?;
         let result = sqlx::query(indoc! {r#"
-            DELETE FROM app_keywords
-            WHERE app_id = ? AND query_id = ?
-        "#})
-        .bind(app.id)
-        .bind(query_id)
-        .execute(&mut *tx)
-        .await?;
-        if result.rows_affected() == 0 {
-            bail!("keyword {query_id} is not tracked for app {app_id}");
-        }
-        sqlx::query(indoc! {r#"
             DELETE FROM keyword_queries
             WHERE id = ?
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM app_keywords
-                  WHERE query_id = ?
-              )
         "#})
         .bind(query_id)
-        .bind(query_id)
-        .execute(&mut *tx)
+        .execute(&project.pool)
         .await?;
-        tx.commit().await?;
+        if result.rows_affected() == 0 {
+            bail!("keyword {query_id} is not tracked in this project");
+        }
         Ok(())
     }
 
-    pub async fn keywords(&self, project_id: &str, app_id: i64) -> Result<Vec<KeywordView>> {
+    pub async fn keywords(
+        &self,
+        project_id: &str,
+        app_id: Option<i64>,
+    ) -> Result<Vec<KeywordView>> {
         let project = self.manager.get(project_id).await?;
-        let app = find_app(&project.pool, app_id).await?;
+        let tracked_apple_id = match app_id {
+            Some(app_id) => Some(find_app(&project.pool, app_id).await?.apple_id),
+            None => None,
+        };
         let records = sqlx::query_as::<_, KeywordRecord>(indoc! {r#"
             SELECT
                 q.id AS query_id,
                 q.query,
+                q.normalized_query,
                 q.country,
-                tracked.notes
-            FROM app_keywords tracked
-            JOIN keyword_queries q ON q.id = tracked.query_id
-            WHERE tracked.app_id = ?
+                q.notes,
+                q.difficulty,
+                q.popularity
+            FROM keyword_queries q
             ORDER BY q.query COLLATE NOCASE, q.country
         "#})
-        .bind(app.id)
         .fetch_all(&project.pool)
         .await?;
         let mut keywords = Vec::with_capacity(records.len());
         for record in records {
-            keywords.push(keyword_view(&project.pool, app.apple_id, record).await?);
+            keywords.push(keyword_view(&project.pool, tracked_apple_id, record).await?);
         }
         Ok(keywords)
     }
@@ -948,54 +988,54 @@ impl AppService {
             SELECT
                 q.id AS query_id,
                 q.query,
+                q.normalized_query,
                 q.country,
-                tracked.notes
-            FROM app_keywords tracked
-            JOIN keyword_queries q ON q.id = tracked.query_id
-            WHERE tracked.app_id = ? AND q.id = ?
+                q.notes,
+                q.difficulty,
+                q.popularity
+            FROM keyword_queries q
+            WHERE q.id = ?
         "#})
-        .bind(app.id)
         .bind(query_id)
         .fetch_one(&project.pool)
         .await
-        .context("tracked keyword was not found")?;
-        keyword_view(&project.pool, app.apple_id, record).await
+        .context("keyword is not tracked in this project")?;
+        keyword_view(&project.pool, Some(app.apple_id), record).await
     }
 
     pub async fn refresh_keywords(
         &self,
         project_id: &str,
-        app_id: i64,
+        app_id: Option<i64>,
         query_id: Option<i64>,
         force: bool,
     ) -> Result<Vec<KeywordView>> {
         let project = self.manager.get(project_id).await?;
-        let app = find_app(&project.pool, app_id).await?;
+        if let Some(app_id) = app_id {
+            find_app(&project.pool, app_id).await?;
+        }
         let ids = match query_id {
             Some(query_id) => {
                 let exists: bool = sqlx::query_scalar(indoc! {r#"
                     SELECT EXISTS(
                         SELECT 1
-                        FROM app_keywords
-                        WHERE app_id = ? AND query_id = ?
+                        FROM keyword_queries
+                        WHERE id = ?
                     )
                 "#})
-                .bind(app.id)
                 .bind(query_id)
                 .fetch_one(&project.pool)
                 .await?;
                 if !exists {
-                    bail!("keyword {query_id} is not tracked for app {app_id}");
+                    bail!("keyword {query_id} is not tracked in this project");
                 }
                 vec![query_id]
             }
             None => {
                 sqlx::query_scalar(indoc! {r#"
-                SELECT query_id
-                FROM app_keywords
-                WHERE app_id = ?
-            "#})
-                .bind(app.id)
+                    SELECT id
+                    FROM keyword_queries
+                "#})
                 .fetch_all(&project.pool)
                 .await?
             }
@@ -1775,7 +1815,7 @@ async fn review_summary(pool: &SqlitePool, app_id: i64, country: &str) -> Result
 
 async fn keyword_view(
     pool: &SqlitePool,
-    tracked_apple_id: i64,
+    tracked_apple_id: Option<i64>,
     record: KeywordRecord,
 ) -> Result<KeywordView> {
     let runs = sqlx::query(indoc! {r#"
@@ -1809,22 +1849,27 @@ async fn keyword_view(
         .map(|row| row.try_get::<Option<i64>, _>("position"))
         .transpose()?
         .flatten();
-    let trend = sqlx::query_as::<_, KeywordTrendPoint>(indoc! {r#"
-        SELECT
-            runs.fetched_at,
-            results.position
-        FROM keyword_query_runs runs
-        LEFT JOIN keyword_results results
-          ON results.run_id = runs.id
-         AND results.apple_id = ?
-        WHERE runs.query_id = ?
-          AND datetime(runs.fetched_at) >= datetime('now', '-30 days')
-        ORDER BY runs.fetched_at
-    "#})
-    .bind(tracked_apple_id)
-    .bind(record.query_id)
-    .fetch_all(pool)
-    .await?;
+    let trend = match tracked_apple_id {
+        Some(tracked_apple_id) => {
+            sqlx::query_as::<_, KeywordTrendPoint>(indoc! {r#"
+                SELECT
+                    runs.fetched_at,
+                    results.position
+                FROM keyword_query_runs runs
+                LEFT JOIN keyword_results results
+                  ON results.run_id = runs.id
+                 AND results.apple_id = ?
+                WHERE runs.query_id = ?
+                  AND datetime(runs.fetched_at) >= datetime('now', '-30 days')
+                ORDER BY runs.fetched_at
+            "#})
+            .bind(tracked_apple_id)
+            .bind(record.query_id)
+            .fetch_all(pool)
+            .await?
+        }
+        None => Vec::new(),
+    };
     let latest_run_id: Option<i64> = sqlx::query_scalar(indoc! {r#"
         SELECT id
         FROM keyword_query_runs
@@ -1859,10 +1904,15 @@ async fn keyword_view(
         None => Vec::new(),
     };
     Ok(KeywordView {
-        query_id: record.query_id,
-        keyword: record.query,
-        notes: record.notes,
-        country: record.country,
+        entity: keyword_entity(
+            record.query_id,
+            record.query,
+            record.normalized_query,
+            record.country,
+            record.notes,
+            record.difficulty,
+            record.popularity,
+        ),
         last_updated,
         position,
         previous_position,
@@ -1905,19 +1955,59 @@ async fn prune_history(pool: &SqlitePool) -> Result<()> {
     Ok(())
 }
 
-fn normalize_keyword(keyword: &str) -> Result<String> {
-    let normalized = keyword
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_lowercase();
-    if normalized.is_empty() {
-        bail!("keyword must not be empty");
+async fn keyword_entity_by_id(pool: &SqlitePool, query_id: i64) -> Result<KeywordEntity> {
+    let record = sqlx::query_as::<_, KeywordEntityRecord>(indoc! {r#"
+        SELECT
+            id AS query_id,
+            query,
+            normalized_query,
+            country,
+            notes,
+            difficulty,
+            popularity
+        FROM keyword_queries
+        WHERE id = ?
+    "#})
+    .bind(query_id)
+    .fetch_optional(pool)
+    .await?
+    .context("keyword is not tracked in this project")?;
+    Ok(keyword_entity(
+        record.query_id,
+        record.query,
+        record.normalized_query,
+        record.country,
+        record.notes,
+        record.difficulty,
+        record.popularity,
+    ))
+}
+
+fn keyword_entity(
+    query_id: i64,
+    keyword: String,
+    normalized_keyword: String,
+    country: String,
+    notes: String,
+    difficulty: Option<f64>,
+    popularity: Option<f64>,
+) -> KeywordEntity {
+    KeywordEntity {
+        query_id,
+        keyword,
+        normalized_keyword,
+        country,
+        notes,
+        difficulty,
+        popularity,
     }
-    if normalized.chars().count() > 200 {
-        bail!("keyword must be at most 200 characters");
+}
+
+fn validate_keyword_metric(name: &str, value: f64) -> Result<()> {
+    if !value.is_finite() || !(0.0..=100.0).contains(&value) {
+        bail!("{name} must be a number from 0 to 100");
     }
-    Ok(normalized)
+    Ok(())
 }
 
 fn checked_app_id(app_id: u64) -> Result<i64> {
@@ -1962,3 +2052,129 @@ fn string_at(value: Option<&Value>, pointer: &str) -> Option<String> {
 
 #[allow(dead_code)]
 async fn _transaction_marker(_: &mut Transaction<'_, Sqlite>) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn canonical_metric_updates_are_shared_and_support_partial_clears() {
+        let temporary = tempfile::tempdir().unwrap();
+        let manager = ProjectManager::open(Some(temporary.path().to_path_buf()))
+            .await
+            .unwrap();
+        let project = manager.list().await.remove(0);
+        let handle = manager.get(&project.id).await.unwrap();
+        let now = Utc::now().to_rfc3339();
+
+        for app_id in [1001_i64, 1002_i64] {
+            sqlx::query("INSERT INTO apps (apple_id, created_at) VALUES (?, ?)")
+                .bind(app_id)
+                .bind(&now)
+                .execute(&handle.pool)
+                .await
+                .unwrap();
+        }
+        sqlx::query(indoc! {r#"
+            INSERT INTO keyword_queries (query, normalized_query, country, notes, created_at)
+            VALUES ('Music Discovery', 'music discovery', 'us', 'Project note', ?)
+        "#})
+        .bind(&now)
+        .execute(&handle.pool)
+        .await
+        .unwrap();
+        let run = sqlx::query(indoc! {r#"
+            INSERT INTO keyword_query_runs (query_id, fetched_at, result_count)
+            VALUES (1, ?, 2)
+        "#})
+        .bind(&now)
+        .execute(&handle.pool)
+        .await
+        .unwrap();
+        let run_id = run.last_insert_rowid();
+        for (position, apple_id) in [(3_i64, 1001_i64), (9_i64, 1002_i64)] {
+            sqlx::query(indoc! {r#"
+                INSERT INTO keyword_results (run_id, position, apple_id, name)
+                VALUES (?, ?, ?, ?)
+            "#})
+            .bind(run_id)
+            .bind(position)
+            .bind(apple_id)
+            .bind(format!("App {apple_id}"))
+            .execute(&handle.pool)
+            .await
+            .unwrap();
+        }
+
+        let service = AppService::new(manager, ClientConfig::default()).unwrap();
+        let update: UpdateKeywordMetrics = serde_json::from_value(json!({
+            "keyword": "  MUSIC\n DISCOVERY ",
+            "country": "US",
+            "difficulty": 64,
+            "popularity": 82.5
+        }))
+        .unwrap();
+        let updated = service
+            .update_keyword_metrics(&project.id, &update)
+            .await
+            .unwrap();
+        assert_eq!(updated.normalized_keyword, "music discovery");
+        assert_eq!(updated.difficulty, Some(64.0));
+        assert_eq!(updated.popularity, Some(82.5));
+
+        for (app_id, expected_position) in [(1001_i64, 3_i64), (1002_i64, 9_i64)] {
+            let keywords = service.keywords(&project.id, Some(app_id)).await.unwrap();
+            assert_eq!(keywords.len(), 1);
+            assert_eq!(keywords[0].position, Some(expected_position));
+            assert_eq!(keywords[0].entity.notes, "Project note");
+            assert_eq!(keywords[0].entity.difficulty, Some(64.0));
+            assert_eq!(keywords[0].entity.popularity, Some(82.5));
+            let response = serde_json::to_value(&keywords[0]).unwrap();
+            assert_eq!(response["normalized_keyword"], "music discovery");
+            assert_eq!(response["notes"], "Project note");
+            assert_eq!(response["difficulty"], 64.0);
+            assert!(response.get("entity").is_none());
+        }
+
+        let project_keywords = service.keywords(&project.id, None).await.unwrap();
+        assert_eq!(project_keywords.len(), 1);
+        assert_eq!(project_keywords[0].position, None);
+        assert!(project_keywords[0].trend.is_empty());
+        assert_eq!(project_keywords[0].apps_in_ranking.len(), 2);
+
+        let clear_difficulty: UpdateKeywordMetrics = serde_json::from_value(json!({
+            "keyword": "music discovery",
+            "country": "us",
+            "difficulty": null
+        }))
+        .unwrap();
+        let cleared = service
+            .update_keyword_metrics(&project.id, &clear_difficulty)
+            .await
+            .unwrap();
+        assert_eq!(cleared.difficulty, None);
+        assert_eq!(cleared.popularity, Some(82.5));
+
+        let invalid: UpdateKeywordMetrics = serde_json::from_value(json!({
+            "keyword": "music discovery",
+            "country": "us",
+            "popularity": 101
+        }))
+        .unwrap();
+        assert!(service
+            .update_keyword_metrics(&project.id, &invalid)
+            .await
+            .is_err());
+
+        service.delete_app(&project.id, 1001).await.unwrap();
+        assert_eq!(
+            service
+                .keywords(&project.id, Some(1002))
+                .await
+                .unwrap()
+                .len(),
+            1,
+            "deleting an app must not delete project keywords"
+        );
+    }
+}

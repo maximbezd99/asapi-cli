@@ -72,12 +72,29 @@ curl -X POST \
   -H 'content-type: application/json' \
   -d '{"country":"jp","auto_refresh":false}'
 
-# Track a keyword. Search results are shared by query and country per project.
+# Track a project keyword. It appears for every app with that app's rank.
 curl -X POST \
-  http://127.0.0.1:3000/api/v1/projects/<project-id>/apps/284882215/keywords \
+  http://127.0.0.1:3000/api/v1/projects/<project-id>/keywords \
   -H 'content-type: application/json' \
   -d '{"keyword":"music","country":"us","notes":"Core category term"}'
+
+# Read the project keywords using one tracked app as ranking context.
+curl \
+  'http://127.0.0.1:3000/api/v1/projects/<project-id>/keywords?app_id=284882215'
+
+# Attach externally sourced 0–100 metrics to that canonical keyword.
+# Either metric may be omitted; send null to clear a stored value.
+curl -X PATCH \
+  http://127.0.0.1:3000/api/v1/projects/<project-id>/keywords/metrics \
+  -H 'content-type: application/json' \
+  -d '{"keyword":"  MUSIC ","country":"US","difficulty":63,"popularity":81}'
 ```
+
+Keyword identity is standardized by collapsed whitespace, lowercase matching,
+and storefront. Keywords belong to the project; updating one or its metrics
+changes the shared record shown for every tracked app in that project.
+Omit `app_id` when listing or refreshing keywords if app-specific position and
+trend are not needed.
 
 The main storefront and opt-in automatic storefronts refresh after 24 hours.
 Opening an on-demand storefront or review page refreshes stale data. App,
